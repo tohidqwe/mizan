@@ -1,0 +1,38 @@
+{
+  "url": "http://127.0.0.1:8081/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "میزان",
+      "hasCanvas": false,
+      "bodyTextLen": 1067,
+      "bodyTextHash": "f6b5d056df775d58899ab35d9672b543c398891d7e42e7236acc6d2c871188ef",
+      "bodyTextPrefix": "میزان دانشنامه و آزمون میزان قوانین ایران با متن رسمی، تحلیل دکت",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "میزان",
+      "hasCanvas": false,
+      "bodyTextLen": 1067,
+      "bodyTextHash": "f6b5d056df775d58899ab35d9672b543c398891d7e42e7236acc6d2c871188ef",
+      "bodyTextPrefix": "میزان دانشنامه و آزمون میزان قوانین ایران با متن رسمی، تحلیل دکت",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-built-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-built.json",
+  "divergesFromBaseline": false,
+  "baselineReasons": []
+}

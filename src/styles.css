@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", "Tahoma", ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg: var(--mizan-bg);
+  --color-elevated: var(--mizan-elevated);
+  --color-subtle: var(--mizan-subtle);
+  --color-fg: var(--mizan-fg);
+  --color-muted: var(--mizan-muted);
+  --color-faint: var(--mizan-faint);
+  --color-accent: var(--mizan-accent);
+  --color-accent-fg: var(--mizan-accent-fg);
+  --color-tint: var(--mizan-tint);
+  --color-line: var(--mizan-line);
+  --color-line-strong: var(--mizan-line-strong);
+  --color-seal: var(--mizan-seal);
+  --color-ok: var(--mizan-ok);
+  --color-warn: var(--mizan-warn);
+  --color-ring: var(--mizan-accent);
+
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 28px;
+
+  --shadow-card: 0 0 0 1px color-mix(in oklab, var(--mizan-fg) 6%, transparent),
+    0 1px 2px -1px color-mix(in oklab, var(--mizan-fg) 6%, transparent),
+    0 2px 8px -2px color-mix(in oklab, var(--mizan-fg) 5%, transparent);
+}
+
+:root {
+  --mizan-bg: #f3efe6;
+  --mizan-elevated: #fbf8f2;
+  --mizan-subtle: #ebe4d6;
+  --mizan-fg: #1a1916;
+  --mizan-muted: #6f6a63;
+  --mizan-faint: #8a847a;
+  --mizan-accent: #2c3d4f;
+  --mizan-accent-fg: #f3efe6;
+  --mizan-tint: #e4e8ec;
+  --mizan-line: #ddd6c8;
+  --mizan-line-strong: #c9c2b4;
+  --mizan-seal: #8b3a32;
+  --mizan-ok: #2f5d50;
+  --mizan-warn: #8a5a28;
+}
+
+html.night {
+  --mizan-bg: #14161a;
+  --mizan-elevated: #1c1f24;
+  --mizan-subtle: #24282e;
+  --mizan-fg: #ede6d8;
+  --mizan-muted: #a39c92;
+  --mizan-faint: #7d7870;
+  --mizan-accent: #c5d0db;
+  --mizan-accent-fg: #14161a;
+  --mizan-tint: #2a3138;
+  --mizan-line: #2e333a;
+  --mizan-line-strong: #3c434c;
+  --mizan-seal: #d7a39c;
+  --mizan-ok: #8fbfb0;
+  --mizan-warn: #d4b48a;
+}
+
+@layer base {
+  html {
+    background: var(--mizan-bg);
+    color: var(--mizan-fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--mizan-bg);
+    color: var(--mizan-fg);
+    font-family: var(--font-sans);
+    line-height: 1.7;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    line-height: 1.25;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--mizan-accent) 22%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
