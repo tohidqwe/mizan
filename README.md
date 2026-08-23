@@ -7,15 +7,24 @@
 - مطالعه روزانه سه ماده از هر قانون
 - تنظیم یادآوری (نوتیفیکیشن فقط روی آدرس HTTPS واقعی و مرورگر کروم کار می‌کند)
 
-## انتشار روی Vercel (رایگان)
+## انتشار روی Netlify (رایگان)
+
+1. برو [https://app.netlify.com](https://app.netlify.com) و با **GitHub** وارد شو.
+2. **Add new site → Import an existing project**.
+3. ریپوی `mizan` را انتخاب کن.
+4. تنظیمات بیلد را این‌طور بگذار (اگر خالی بود):
+   - **Build command:** `npm run build`
+   - **Publish directory:** `dist/client`
+5. **Deploy** بزن.
+6. لینک نهایی (مثل `https://something.netlify.app`) را در **کروم گوشی** باز کن.
+7. منوی سه‌نقطه → افزودن به صفحه اصلی.
+8. اجازه نوتیفیکیشن را بده.
+
+## انتشار روی Vercel (جایگزین)
 
 1. وارد [vercel.com](https://vercel.com) شو و با GitHub وارد شو.
-2. **Add New Project** بزن.
-3. ریپوی `mizan` را Import کن.
-4. بدون تغییر تنظیمات، Deploy را بزن.
-5. لینک نهایی را در **کروم گوشی** باز کن.
-6. منوی سه‌نقطه → افزودن به صفحه اصلی.
-7. اجازه نوتیفیکیشن را بده.
+2. **Add New Project** → ریپوی `mizan` را Import کن.
+3. Deploy را بزن.
 
 ## اجرای محلی (برای توسعه‌دهنده)
 
