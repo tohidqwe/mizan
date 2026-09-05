@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { TrackLawId } from "@/data/types";
+import type { ExamAttempt, ExamConfidence, ExamSubject, TrackLawId } from "@/data/types";
 import { todayKey } from "./utils";
 
 export type ReviewMark = "again" | "known";
@@ -25,7 +25,10 @@ type State = {
   completedDailyDate: string | null;
   reviewed: Record<string, ReviewEntry>;
   bookmarks: string[];
+  /** آخرین گزینه انتخاب‌شده برای سازگاری با نسخه‌های قبلی اپ. */
   examPicks: Record<string, number>;
+  /** تاریخچه واقعی تمرین؛ مبنای مأموریت روزانه، ضعف‌ها و نمره منفی. */
+  examAttempts: ExamAttempt[];
   lastNotifyDate: string | null;
   installDismissed: boolean;
   hydrated: boolean;
@@ -35,7 +38,13 @@ type State = {
   completeToday: () => void;
   markArticle: (key: string, mark: ReviewMark) => void;
   toggleBookmark: (key: string) => void;
-  recordExam: (id: string, pick: number) => void;
+  recordExam: (
+    id: string,
+    pick: number | null,
+    correct: boolean,
+    subject: ExamSubject,
+    confidence: ExamConfidence,
+  ) => void;
   resetExamPicks: () => void;
   setLastNotifyDate: (d: string) => void;
   dismissInstall: () => void;
@@ -51,6 +60,7 @@ export const useMizan = create<State>()(
       reviewed: {},
       bookmarks: [],
       examPicks: {},
+      examAttempts: [],
       lastNotifyDate: null,
       installDismissed: false,
       hydrated: false,
@@ -91,7 +101,24 @@ export const useMizan = create<State>()(
           bookmarks: has ? get().bookmarks.filter((k) => k !== key) : [...get().bookmarks, key],
         });
       },
-      recordExam: (id, pick) => set({ examPicks: { ...get().examPicks, [id]: pick } }),
+      recordExam: (id, pick, correct, subject, confidence) => {
+        const at = Date.now();
+        const attempt: ExamAttempt = {
+          id: `${id}-${at}`,
+          questionId: id,
+          subject,
+          date: todayKey(),
+          at,
+          pick,
+          correct,
+          skipped: pick === null,
+          confidence,
+        };
+        set({
+          examPicks: pick === null ? get().examPicks : { ...get().examPicks, [id]: pick },
+          examAttempts: [...get().examAttempts, attempt].slice(-10000),
+        });
+      },
       resetExamPicks: () => set({ examPicks: {} }),
       setLastNotifyDate: (d) => set({ lastNotifyDate: d }),
       dismissInstall: () => set({ installDismissed: true }),
@@ -107,6 +134,7 @@ export const useMizan = create<State>()(
         reviewed: s.reviewed,
         bookmarks: s.bookmarks,
         examPicks: s.examPicks,
+        examAttempts: s.examAttempts,
         lastNotifyDate: s.lastNotifyDate,
         installDismissed: s.installDismissed,
       }),
