@@ -61,10 +61,23 @@ export const SUBJECT_LABEL: Record<ExamSubject, string> = {
   pil: "حقوق بین‌الملل خصوصی",
 };
 
+export type ExamSource = {
+  bookletUrl?: string;
+  keyUrl?: string;
+  bookletCode?: string;
+  questionNo?: number;
+};
+
 export type ExamQuestion = {
   id: string;
   year: string;
   official: boolean;
+  /**
+   * فقط وقتی true است که متن سؤال، سال/شماره و کلید با منبع آزمون تطبیق داده شده باشد.
+   * official=true به تنهایی برای نمایش برچسب «سنجش ـ تأییدشده» کافی نیست.
+   */
+  verified?: boolean;
+  source?: ExamSource;
   subject: ExamSubject;
   topic: string;
   stem: string;
@@ -72,6 +85,22 @@ export type ExamQuestion = {
   answer: 0 | 1 | 2 | 3;
   explanation: string;
   articles: string[];
+  /** دام یا نکته‌ای که طراح با آن گزینه‌های نزدیک را از هم جدا می‌کند. */
+  trap?: string;
+};
+
+export type ExamConfidence = "sure" | "between" | "guess";
+
+export type ExamAttempt = {
+  id: string;
+  questionId: string;
+  subject: ExamSubject;
+  date: string;
+  at: number;
+  pick: number | null;
+  correct: boolean;
+  skipped: boolean;
+  confidence: ExamConfidence;
 };
 
 export const TRACK_LAWS = ["civil", "commerce", "procedure"] as const;
