@@ -1,5 +1,6 @@
 import { TRACK_META, type TrackLawId } from "@/data/types";
 import { trackArticles } from "@/data";
+import { dailyProgress } from "./exam-coach";
 import { toFaDigits, todayKey } from "./utils";
 import { useMizan } from "./store";
 
@@ -51,28 +52,25 @@ async function showLocalNotification(title: string, body: string, url: string) {
     await reg.showNotification(title, options);
     return;
   } catch {
-    if (Notification.permission === "granted") {
-      new Notification(title, options);
-    }
+    if (Notification.permission === "granted") new Notification(title, options);
   }
 }
 
 export async function fireTodaysNotifications() {
-  const { reminder, cursors, lastNotifyDate, setLastNotifyDate } = useMizan.getState();
+  const { reminder, cursors, lastNotifyDate, setLastNotifyDate, examAttempts } = useMizan.getState();
   const today = todayKey();
-  if (!reminder.enabled) return;
-  if (lastNotifyDate === today) return;
+  if (!reminder.enabled || lastNotifyDate === today) return;
   if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
 
   if (reminder.articles) {
     await showLocalNotification("سه ماده امروز — میزان", dailySummaryText(cursors), "/daily");
   }
   if (reminder.exam) {
-    await showLocalNotification(
-      "یادآوری تست دکتری حقوق خصوصی",
-      "چند تست بزنید؛ پس از هر سؤال، پاسخ و علت نمایش داده می‌شود.",
-      "/exam",
-    );
+    const progress = dailyProgress(examAttempts);
+    const body = progress.complete
+      ? "مأموریت ۲۰ تست امروز کامل شده؛ اگر خواستی دفترچه اشتباهات را مرور کن."
+      : `${toFaDigits(progress.remaining)} تست از مأموریت امروز مانده؛ تجارت و متون فقه اولویت بیشتری دارند.`;
+    await showLocalNotification("مأموریت دکتری حقوق خصوصی", body, "/exam");
   }
   setLastNotifyDate(today);
 }
@@ -110,8 +108,6 @@ export async function initNotifications() {
   const now = new Date();
   const [h, m] = reminder.time.split(":").map((x) => Number(x) || 0);
   const passed = now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m);
-  if (passed && lastNotifyDate !== todayKey()) {
-    await fireTodaysNotifications();
-  }
+  if (passed && lastNotifyDate !== todayKey()) await fireTodaysNotifications();
   scheduleReminderLoop();
 }
