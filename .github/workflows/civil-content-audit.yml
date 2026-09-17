@@ -40,12 +40,20 @@ jobs:
         continue-on-error: true
         run: node scripts/civil/fetch-official-sources.mjs
 
+      - name: Compare qavanin and Majlis article spine
+        id: official_spine
+        if: steps.official_sources.outcome == 'success'
+        continue-on-error: true
+        run: node scripts/civil/build-verified-spine.mjs
+
       - name: Upload legal-source audit
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: civil-official-source-audit
-          path: artifacts/civil-official-sources/
+          path: |
+            artifacts/civil-official-sources/
+            artifacts/civil-verified-spine/
           if-no-files-found: warn
           retention-days: 14
 
@@ -53,4 +61,10 @@ jobs:
         if: steps.official_sources.outcome != 'success'
         run: |
           echo 'Civil Code release gate remains CLOSED because at least one required official source could not be retrieved reliably.'
+          exit 1
+
+      - name: Enforce two-source text gate
+        if: steps.official_sources.outcome == 'success' && steps.official_spine.outcome != 'success'
+        run: |
+          echo 'Civil Code release gate remains CLOSED because the qavanin/Majlis 1..1335 text spine is incomplete, duplicated, or conflicting.'
           exit 1
