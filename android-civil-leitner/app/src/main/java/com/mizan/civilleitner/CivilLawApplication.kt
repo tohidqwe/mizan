@@ -2,6 +2,7 @@ package com.mizan.civilleitner
 
 import android.app.Application
 import com.mizan.civilleitner.data.AppDatabase
+import com.mizan.civilleitner.data.StudyCardImporter
 import com.mizan.civilleitner.data.VerifiedArticleImporter
 import com.mizan.civilleitner.worker.ReminderScheduler
 import kotlinx.coroutines.CoroutineScope
@@ -15,9 +16,13 @@ class CivilLawApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        CrashGuard.install(this)
         appScope.launch {
-            VerifiedArticleImporter.importBundledSeedIfEmpty(this@CivilLawApplication, database)
+            // Non-destructive startup integrity check: missing official rows are repaired, progress is preserved.
+            VerifiedArticleImporter.importBundledSeedAndRepair(this@CivilLawApplication, database)
+            StudyCardImporter.importBundledCardsIfPresent(this@CivilLawApplication, database)
+            ReminderScheduler.refreshNow(this@CivilLawApplication)
         }
-        ReminderScheduler.scheduleNext(this, 21, 0)
+        ReminderScheduler.scheduleNext(this, 8, 0)
     }
 }
