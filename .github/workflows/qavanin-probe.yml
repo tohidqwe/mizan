@@ -1,0 +1,30 @@
+name: Qavanin Trade Law Probe
+
+on:
+  push:
+    branches: [feature/civil-law-leitner-v0.1]
+    paths:
+      - '.github/workflows/qavanin-probe.yml'
+      - 'android-civil-leitner/tools/qavanin_probe.mjs'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Probe Qavanin search form
+        run: node android-civil-leitner/tools/qavanin_probe.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qavanin-probe
+          path: qavanin-probe/
+          if-no-files-found: error
