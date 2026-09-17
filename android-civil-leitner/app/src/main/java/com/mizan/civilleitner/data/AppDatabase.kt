@@ -11,9 +11,10 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import kotlinx.coroutines.flow.Flow
 import org.json.JSONArray
-import java.time.LocalDate
 
 @Entity(tableName = "articles")
 data class ArticleEntity(
@@ -35,8 +36,9 @@ data class ArticleEntity(
     val source2: String,
     val verificationStatus: String = "VERIFIED_OFFICIAL",
     val verificationDate: String = "",
+    // Legacy Leitner fields retained so an installed v0.1 database migrates without losing progress.
     val reviewBox: Int = 1,
-    val nextReviewEpochDay: Long = LocalDate.now().toEpochDay(),
+    val nextReviewEpochDay: Long = Long.MAX_VALUE,
     val lastReviewEpochDay: Long? = null,
     val reviewCount: Int = 0,
     val correctCount: Int = 0,
@@ -44,6 +46,42 @@ data class ArticleEntity(
     val masteryLevel: String = "New",
     val note: String = "",
     val favorite: Boolean = false,
+    // Strict 140-day exam mode. A single user action activates the review cycle.
+    val reviewEnabled: Boolean = false,
+    val strictReviewStage: Int = 0,
+    val explicitMastered: Boolean = false,
+    val firstStudiedEpochDay: Long? = null,
+)
+
+@Entity(tableName = "study_cards")
+data class StudyCardEntity(
+    @PrimaryKey val id: String,
+    val domain: String, // TRADE, FIQH, VOCAB, MOCK, ERROR
+    val ordinal: Int,
+    val title: String,
+    val prompt: String,
+    val answer: String,
+    val explanation: String = "",
+    val sourceName: String = "",
+    val sourceUrl: String = "",
+    val verificationStatus: String = "CURATED",
+    val reviewEnabled: Boolean = false,
+    val strictReviewStage: Int = 0,
+    val nextReviewEpochDay: Long = Long.MAX_VALUE,
+    val lastReviewEpochDay: Long? = null,
+    val reviewCount: Int = 0,
+    val explicitMastered: Boolean = false,
+    val firstStudiedEpochDay: Long? = null,
+    val note: String = "",
+    val favorite: Boolean = false,
+)
+
+@Entity(tableName = "daily_progress")
+data class DailyProgressEntity(
+    @PrimaryKey val dayNumber: Int,
+    val completedMask: Int = 0,
+    val dayCompleted: Boolean = false,
+    val updatedEpochDay: Long,
 )
 
 @Dao
@@ -51,19 +89,22 @@ interface ArticleDao {
     @Query("SELECT * FROM articles ORDER BY articleNumber")
     fun observeAll(): Flow<List<ArticleEntity>>
 
-    @Query("SELECT * FROM articles WHERE nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
+    @Query("SELECT * FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
     fun observeDue(today: Long): Flow<List<ArticleEntity>>
 
     @Query("SELECT COUNT(*) FROM articles")
     fun observeTotalCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM articles WHERE nextReviewEpochDay < :today")
+    @Query("SELECT COUNT(*) FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay < :today")
     fun observeOverdueCount(today: Long): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM articles")
     suspend fun totalCount(): Int
 
-    @Query("SELECT COUNT(*) FROM articles WHERE nextReviewEpochDay <= :today")
+    @Query("SELECT articleNumber FROM articles ORDER BY articleNumber")
+    suspend fun allArticleNumbers(): List<Int>
+
+    @Query("SELECT COUNT(*) FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today")
     suspend fun dueCount(today: Long): Int
 
     @Query("SELECT * FROM articles WHERE CAST(articleNumber AS TEXT) LIKE '%' || :query || '%' OR officialText LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%' OR topic LIKE '%' || :query || '%' ORDER BY articleNumber")
@@ -72,23 +113,117 @@ interface ArticleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<ArticleEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMissing(items: List<ArticleEntity>)
+
     @Update
     suspend fun update(item: ArticleEntity)
 }
 
-@Database(entities = [ArticleEntity::class], version = 1, exportSchema = false)
+@Dao
+interface StudyCardDao {
+    @Query("SELECT * FROM study_cards ORDER BY domain, ordinal")
+    fun observeAll(): Flow<List<StudyCardEntity>>
+
+    @Query("SELECT * FROM study_cards WHERE domain = :domain ORDER BY ordinal")
+    fun observeDomain(domain: String): Flow<List<StudyCardEntity>>
+
+    @Query("SELECT * FROM study_cards WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, domain ASC, ordinal ASC")
+    fun observeDue(today: Long): Flow<List<StudyCardEntity>>
+
+    @Query("SELECT COUNT(*) FROM study_cards WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today")
+    suspend fun dueCount(today: Long): Int
+
+    @Query("SELECT COUNT(*) FROM study_cards")
+    suspend fun totalCount(): Int
+
+    @Query("SELECT * FROM study_cards WHERE title LIKE '%' || :query || '%' OR prompt LIKE '%' || :query || '%' OR answer LIKE '%' || :query || '%' OR explanation LIKE '%' || :query || '%' ORDER BY domain, ordinal")
+    fun search(query: String): Flow<List<StudyCardEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMissing(items: List<StudyCardEntity>)
+
+    @Update
+    suspend fun update(item: StudyCardEntity)
+}
+
+@Dao
+interface PlanDao {
+    @Query("SELECT dayNumber FROM daily_progress WHERE dayCompleted = 1 ORDER BY dayNumber")
+    fun observeCompletedDays(): Flow<List<Int>>
+
+    @Query("SELECT * FROM daily_progress WHERE dayNumber = :day LIMIT 1")
+    fun observeDay(day: Int): Flow<DailyProgressEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(progress: DailyProgressEntity)
+}
+
+@Database(
+    entities = [ArticleEntity::class, StudyCardEntity::class, DailyProgressEntity::class],
+    version = 2,
+    exportSchema = false,
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
+    abstract fun studyCardDao(): StudyCardDao
+    abstract fun planDao(): PlanDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE articles ADD COLUMN reviewEnabled INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE articles ADD COLUMN strictReviewStage INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE articles ADD COLUMN explicitMastered INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE articles ADD COLUMN firstStudiedEpochDay INTEGER")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS study_cards (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        domain TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL,
+                        title TEXT NOT NULL,
+                        prompt TEXT NOT NULL,
+                        answer TEXT NOT NULL,
+                        explanation TEXT NOT NULL,
+                        sourceName TEXT NOT NULL,
+                        sourceUrl TEXT NOT NULL,
+                        verificationStatus TEXT NOT NULL,
+                        reviewEnabled INTEGER NOT NULL,
+                        strictReviewStage INTEGER NOT NULL,
+                        nextReviewEpochDay INTEGER NOT NULL,
+                        lastReviewEpochDay INTEGER,
+                        reviewCount INTEGER NOT NULL,
+                        explicitMastered INTEGER NOT NULL,
+                        firstStudiedEpochDay INTEGER,
+                        note TEXT NOT NULL,
+                        favorite INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS daily_progress (
+                        dayNumber INTEGER NOT NULL PRIMARY KEY,
+                        completedMask INTEGER NOT NULL,
+                        dayCompleted INTEGER NOT NULL,
+                        updatedEpochDay INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "civil-law-leitner.db",
-            ).build().also { INSTANCE = it }
+            ).addMigrations(MIGRATION_1_2)
+                .build()
+                .also { INSTANCE = it }
         }
     }
 }
@@ -96,10 +231,11 @@ abstract class AppDatabase : RoomDatabase() {
 object VerifiedArticleImporter {
     private val acceptedVerificationStatuses = setOf("VERIFIED_OFFICIAL", "VERIFIED_RRK")
 
-    suspend fun importBundledSeedIfEmpty(context: Context, db: AppDatabase) {
-        val dao = db.articleDao()
-        if (dao.totalCount() > 0) return
-
+    /**
+     * Validates the bundled 1335-article dataset every startup. Missing rows are repaired with IGNORE
+     * semantics so a repair never overwrites the user's review state, notes, favorites, or mastery.
+     */
+    suspend fun importBundledSeedAndRepair(context: Context, db: AppDatabase) {
         val raw = context.assets.open("civil_seed.json").bufferedReader().use { it.readText() }
         val array = JSONArray(raw)
         require(array.length() == 1335) {
@@ -120,7 +256,7 @@ object VerifiedArticleImporter {
                     "Civil Code release gate failed at index $i: expected article $expectedArticleNumber, got $articleNumber"
                 }
                 require(status in acceptedVerificationStatuses) {
-                    "Only independently verified official legal text may be bundled: article $articleNumber has $status"
+                    "Only verified official legal text may be bundled: article $articleNumber has $status"
                 }
                 require(officialText.isNotBlank()) { "Official text is blank for article $articleNumber" }
                 require(source1.isNotBlank() && source2.isNotBlank()) {
@@ -136,13 +272,17 @@ object VerifiedArticleImporter {
                         chapter = o.optString("chapter"),
                         section = o.optString("section"),
                         topic = o.optString("topic"),
-                        keywords = o.optJSONArray("keywords")?.let { a -> (0 until a.length()).joinToString("|") { a.getString(it) } }.orEmpty(),
+                        keywords = o.optJSONArray("keywords")?.let { a ->
+                            (0 until a.length()).joinToString("|") { a.getString(it) }
+                        }.orEmpty(),
                         recallQuestion = o.optString("recallQuestion"),
                         twoChoiceQuestion = o.optString("twoChoiceQuestion"),
                         simpleExplanation = o.optString("simpleExplanation"),
                         analyticalPoint = o.optString("analyticalPoint"),
                         importantPoints = o.optString("importantPoints"),
-                        relatedArticles = o.optJSONArray("relatedArticles")?.let { a -> (0 until a.length()).joinToString(",") { a.getInt(it).toString() } }.orEmpty(),
+                        relatedArticles = o.optJSONArray("relatedArticles")?.let { a ->
+                            (0 until a.length()).joinToString(",") { a.getInt(it).toString() }
+                        }.orEmpty(),
                         source1 = source1,
                         source2 = source2,
                         verificationStatus = status,
@@ -151,6 +291,37 @@ object VerifiedArticleImporter {
                 )
             }
         }
-        dao.insertAll(records)
+        db.articleDao().insertMissing(records)
+        require(db.articleDao().totalCount() == 1335) {
+            "Civil Code startup integrity check failed after non-destructive repair"
+        }
+    }
+}
+
+object StudyCardImporter {
+    suspend fun importBundledCardsIfPresent(context: Context, db: AppDatabase) {
+        if (context.assets.list("")?.contains("study_cards.json") != true) return
+        val raw = context.assets.open("study_cards.json").bufferedReader().use { it.readText() }
+        val array = JSONArray(raw)
+        val records = buildList {
+            for (i in 0 until array.length()) {
+                val o = array.getJSONObject(i)
+                add(
+                    StudyCardEntity(
+                        id = o.getString("id"),
+                        domain = o.getString("domain"),
+                        ordinal = o.getInt("ordinal"),
+                        title = o.getString("title"),
+                        prompt = o.getString("prompt"),
+                        answer = o.getString("answer"),
+                        explanation = o.optString("explanation"),
+                        sourceName = o.optString("sourceName"),
+                        sourceUrl = o.optString("sourceUrl"),
+                        verificationStatus = o.optString("verificationStatus", "CURATED"),
+                    )
+                )
+            }
+        }
+        db.studyCardDao().insertMissing(records)
     }
 }
