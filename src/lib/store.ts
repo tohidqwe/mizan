@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { TrackLawId } from "@/data/types";
+import { initialReviewState, scheduleReview, type ReviewRating, type ReviewState } from "./srs";
 import { todayKey } from "./utils";
 
 export type ReviewMark = "again" | "known";
@@ -24,6 +25,10 @@ type State = {
   cursors: Record<TrackLawId, number>;
   completedDailyDate: string | null;
   reviewed: Record<string, ReviewEntry>;
+  /** Zero-config Civil Code SRS state, keyed by the base article number. */
+  civilReviews: Record<string, ReviewState>;
+  /** First day of the fixed 140-day PhD preparation plan. */
+  civilPlanStartDate: string | null;
   bookmarks: string[];
   examPicks: Record<string, number>;
   lastNotifyDate: string | null;
@@ -34,6 +39,8 @@ type State = {
   setReminder: (patch: Partial<Reminder>) => void;
   completeToday: () => void;
   markArticle: (key: string, mark: ReviewMark) => void;
+  startCivilPlan: () => void;
+  reviewCivilArticle: (articleNo: number, rating: ReviewRating) => ReviewState;
   toggleBookmark: (key: string) => void;
   recordExam: (id: string, pick: number) => void;
   resetExamPicks: () => void;
@@ -49,6 +56,8 @@ export const useMizan = create<State>()(
       cursors: { civil: 0, commerce: 0, procedure: 0 },
       completedDailyDate: null,
       reviewed: {},
+      civilReviews: {},
+      civilPlanStartDate: null,
       bookmarks: [],
       examPicks: {},
       lastNotifyDate: null,
@@ -85,6 +94,24 @@ export const useMizan = create<State>()(
           },
         });
       },
+      startCivilPlan: () => {
+        if (get().civilPlanStartDate) return;
+        set({ civilPlanStartDate: todayKey() });
+      },
+      reviewCivilArticle: (articleNo, rating) => {
+        const key = String(articleNo);
+        const current = get().civilReviews[key] ?? initialReviewState(articleNo);
+        const next = scheduleReview(current, rating);
+        const { sameDayRequeueAfter: _sameDayRequeueAfter, ...persisted } = next;
+        set({
+          civilReviews: {
+            ...get().civilReviews,
+            [key]: persisted,
+          },
+          civilPlanStartDate: get().civilPlanStartDate ?? todayKey(),
+        });
+        return persisted;
+      },
       toggleBookmark: (key) => {
         const has = get().bookmarks.includes(key);
         set({
@@ -105,6 +132,8 @@ export const useMizan = create<State>()(
         cursors: s.cursors,
         completedDailyDate: s.completedDailyDate,
         reviewed: s.reviewed,
+        civilReviews: s.civilReviews,
+        civilPlanStartDate: s.civilPlanStartDate,
         bookmarks: s.bookmarks,
         examPicks: s.examPicks,
         lastNotifyDate: s.lastNotifyDate,
