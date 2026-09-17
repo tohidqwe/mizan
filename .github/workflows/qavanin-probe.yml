@@ -6,6 +6,8 @@ on:
     paths:
       - '.github/workflows/qavanin-probe.yml'
       - 'android-civil-leitner/tools/qavanin_probe.mjs'
+      - 'android-civil-leitner/tools/audit_commerce.mjs'
+      - 'src/data/commerce.ts'
   workflow_dispatch:
 
 jobs:
@@ -17,11 +19,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Audit existing commerce dataset
+        run: node android-civil-leitner/tools/audit_commerce.mjs
       - name: Install Playwright
         run: |
           npm install --no-save playwright@1.55.0
           npx playwright install --with-deps chromium
-      - name: Probe Qavanin search form
+      - name: Probe Qavanin direct documents
         run: node android-civil-leitner/tools/qavanin_probe.mjs
       - uses: actions/upload-artifact@v4
         with:
