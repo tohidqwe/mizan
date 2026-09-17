@@ -60,6 +60,9 @@ interface ArticleDao {
     @Query("SELECT COUNT(*) FROM articles WHERE nextReviewEpochDay < :today")
     fun observeOverdueCount(today: Long): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM articles")
+    suspend fun totalCount(): Int
+
     @Query("SELECT COUNT(*) FROM articles WHERE nextReviewEpochDay <= :today")
     suspend fun dueCount(today: Long): Int
 
@@ -73,7 +76,7 @@ interface ArticleDao {
     suspend fun update(item: ArticleEntity)
 }
 
-@Database(entities = [ArticleEntity::class], version = 1, exportSchema = true)
+@Database(entities = [ArticleEntity::class], version = 1, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
 
@@ -92,6 +95,9 @@ abstract class AppDatabase : RoomDatabase() {
 
 object VerifiedArticleImporter {
     suspend fun importBundledSeedIfEmpty(context: Context, db: AppDatabase) {
+        val dao = db.articleDao()
+        if (dao.totalCount() > 0) return
+
         val raw = context.assets.open("civil_seed.json").bufferedReader().use { it.readText() }
         val array = JSONArray(raw)
         if (array.length() == 0) return
@@ -128,6 +134,6 @@ object VerifiedArticleImporter {
                 )
             }
         }
-        db.articleDao().insertAll(records)
+        dao.insertAll(records)
     }
 }
