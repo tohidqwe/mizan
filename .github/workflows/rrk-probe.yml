@@ -11,23 +11,20 @@ on:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch RRK law search page
-        shell: bash
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright Chromium
         run: |
-          set -euxo pipefail
-          mkdir -p rrk-probe
-          curl -L --retry 3 --connect-timeout 20 --max-time 120 \
-            -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36' \
-            'https://rrk.ir/ords/r/rrs/rrs-front/ghavanin-moghararat' \
-            -o rrk-probe/search.html
-          wc -c rrk-probe/search.html
-          grep -Eo 'P67_[A-Z_]+' rrk-probe/search.html | sort -u | head -50 || true
-          grep -n -m 5 'قانون مدنی' rrk-probe/search.html || true
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Probe RRK and search Civil Code
+        run: node android-civil-leitner/tools/rrk_probe.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: rrk-probe
-          path: rrk-probe/search.html
+          path: rrk-probe/
           if-no-files-found: error
