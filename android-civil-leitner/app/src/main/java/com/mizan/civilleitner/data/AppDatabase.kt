@@ -33,7 +33,7 @@ data class ArticleEntity(
     val relatedArticles: String = "",
     val source1: String,
     val source2: String,
-    val verificationStatus: String = "VERIFIED",
+    val verificationStatus: String = "VERIFIED_OFFICIAL",
     val verificationDate: String = "",
     val reviewBox: Int = 1,
     val nextReviewEpochDay: Long = LocalDate.now().toEpochDay(),
@@ -94,26 +94,43 @@ abstract class AppDatabase : RoomDatabase() {
 }
 
 object VerifiedArticleImporter {
+    private val acceptedVerificationStatuses = setOf("VERIFIED_OFFICIAL", "VERIFIED_RRK")
+
     suspend fun importBundledSeedIfEmpty(context: Context, db: AppDatabase) {
         val dao = db.articleDao()
         if (dao.totalCount() > 0) return
 
         val raw = context.assets.open("civil_seed.json").bufferedReader().use { it.readText() }
         val array = JSONArray(raw)
-        if (array.length() == 0) return
+        require(array.length() == 1335) {
+            "Civil Code release gate failed: expected exactly 1335 main articles, got ${array.length()}"
+        }
 
         val records = buildList {
             for (i in 0 until array.length()) {
                 val o = array.getJSONObject(i)
+                val expectedArticleNumber = i + 1
+                val articleNumber = o.getInt("articleNumber")
                 val status = o.getString("verificationStatus")
                 val source1 = o.getString("source1")
                 val source2 = o.getString("source2")
-                require(status == "VERIFIED") { "Only VERIFIED legal text may be bundled" }
-                require(source1.isNotBlank() && source2.isNotBlank()) { "Two sources are required" }
+                val officialText = o.getString("officialText")
+
+                require(articleNumber == expectedArticleNumber) {
+                    "Civil Code release gate failed at index $i: expected article $expectedArticleNumber, got $articleNumber"
+                }
+                require(status in acceptedVerificationStatuses) {
+                    "Only independently verified official legal text may be bundled: article $articleNumber has $status"
+                }
+                require(officialText.isNotBlank()) { "Official text is blank for article $articleNumber" }
+                require(source1.isNotBlank() && source2.isNotBlank()) {
+                    "Two provenance references are required for article $articleNumber"
+                }
+
                 add(
                     ArticleEntity(
-                        articleNumber = o.getInt("articleNumber"),
-                        officialText = o.getString("officialText"),
+                        articleNumber = articleNumber,
+                        officialText = officialText,
                         book = o.optString("book"),
                         part = o.optString("part"),
                         chapter = o.optString("chapter"),
