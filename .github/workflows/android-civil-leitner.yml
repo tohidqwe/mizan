@@ -70,6 +70,35 @@ jobs:
           print('SEED_SHA256=' + manifest['seedSha256'])
           PY
 
+      - name: Validate English curriculum seed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          assets = pathlib.Path('android-civil-leitner/app/src/main/assets')
+          cards = json.loads((assets / 'study_cards.json').read_text(encoding='utf-8'))
+          manifest = json.loads((assets / 'english_curriculum_manifest.json').read_text(encoding='utf-8'))
+
+          vocab_cards = [x for x in cards if x.get('domain') == 'VOCAB']
+          ids = [x['id'] for x in cards]
+          assert len(ids) == len(set(ids)), 'duplicate study-card id'
+          assert len(vocab_cards) >= 33, f'expected at least 33 initial English cards, got {len(vocab_cards)}'
+          assert manifest['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذره‌بین'
+          assert manifest['primaryReference']['providedByUser'] is True
+          assert manifest['leitner']['intervalDays'] == [1,2,3,7,14,28]
+          assert manifest['leitner']['repeatAfterFinalDays'] == 28
+          assert manifest['leitner']['exitOnlyOnExplicitMastered'] is True
+          assert set(manifest['examFrequencyPolicy']['initialAuditedYears']) >= {1396,1397,1400,1401,1402}
+          assert len(manifest['initialHighFrequencyFamilies']) >= 14
+          assert any(x['id'].startswith('VOCAB:FREQ:') for x in cards)
+          assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in cards)
+          assert any(x['id'].startswith('VOCAB:READING:') for x in cards)
+
+          print('ENGLISH_CURRICULUM_GATE=PASS')
+          print('INITIAL_ENGLISH_CARDS=' + str(len(vocab_cards)))
+          print('PRIMARY_REFERENCE=' + manifest['primaryReference']['name'])
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
