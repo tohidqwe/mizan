@@ -1,0 +1,31 @@
+name: Qavanin Official Civil Code Fetch
+
+on:
+  push:
+    branches: [feature/civil-law-leitner-v0.1]
+    paths:
+      - '.github/workflows/qavanin-official-fetch.yml'
+      - 'android-civil-leitner/tools/qavanin_fetch.mjs'
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Fetch official Civil Code
+        run: node android-civil-leitner/tools/qavanin_fetch.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qavanin-official-civil-code
+          path: qavanin-official/
+          if-no-files-found: warn
