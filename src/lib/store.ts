@@ -1,7 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { TrackLawId } from "@/data/types";
-import { initialReviewState, scheduleReview, type ReviewRating, type ReviewState } from "./srs";
+import {
+  initialReviewState,
+  scheduleReview,
+  type ReviewRating,
+  type ReviewState,
+  type ScheduleResult,
+} from "./srs";
 import { todayKey } from "./utils";
 
 export type ReviewMark = "again" | "known";
@@ -40,7 +46,7 @@ type State = {
   completeToday: () => void;
   markArticle: (key: string, mark: ReviewMark) => void;
   startCivilPlan: () => void;
-  reviewCivilArticle: (articleNo: number, rating: ReviewRating) => ReviewState;
+  reviewCivilArticle: (articleNo: number, rating: ReviewRating) => ScheduleResult;
   toggleBookmark: (key: string) => void;
   recordExam: (id: string, pick: number) => void;
   resetExamPicks: () => void;
@@ -110,7 +116,7 @@ export const useMizan = create<State>()(
           },
           civilPlanStartDate: get().civilPlanStartDate ?? todayKey(),
         });
-        return persisted;
+        return next;
       },
       toggleBookmark: (key) => {
         const has = get().bookmarks.includes(key);
