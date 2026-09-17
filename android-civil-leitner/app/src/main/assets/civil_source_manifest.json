@@ -1,0 +1,38 @@
+{
+  "law": "قانون مدنی",
+  "officialConsolidatedSource": "https://qavanin.ir/Law/TreeText/?IDS=12021850837713548188",
+  "officialSourceId": "12021850837713548188",
+  "officialGazetteReference": "روزنامه رسمی کشور: شماره ثبت 1877، چاپ 2، دوره 9، جلد 1، صفحه 210 (اصل قانون مدنی)",
+  "officialGazetteLiveFetch": false,
+  "officialGazetteLiveFetchNote": "rrk.ir did not respond to the CI/web retrieval attempts; no claim of live RRK page verification is made.",
+  "verificationDateTehran": "2026-09-18",
+  "retrievedUrl": "https://qavanin.ir/Law/PrintText/?IDS=12021850837713548188&font=",
+  "mainArticleCount": 1335,
+  "firstArticleNumber": 1,
+  "lastArticleNumber": 1335,
+  "supplementalCount": 4,
+  "supplementalKeys": [
+    "218مکرر",
+    "881مکرر",
+    "1313مکرر",
+    "1328مکرر"
+  ],
+  "repealedMainArticles": [
+    653,
+    706,
+    947,
+    981,
+    1036,
+    1039,
+    1042,
+    1209,
+    1306,
+    1307,
+    1308,
+    1309,
+    1310,
+    1311
+  ],
+  "sourceBodySha256": "0cc4ab702c2c4f3980a741745dc136c62c89c92d8f1bd99d20e72727e0c8b15d",
+  "seedSha256": "a5955cdd84b716543bd71e125f38061a8db0b66f698193a39eb75eeca455a2fc"
+}
