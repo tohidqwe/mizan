@@ -45,6 +45,8 @@ jobs:
           assert manifest['mainArticleCount'] == 1335
           assert manifest['firstArticleNumber'] == 1 and manifest['lastArticleNumber'] == 1335
           assert manifest['officialSourceId'] == '12021850837713548188'
+          assert manifest['officialConsolidatedSource'].startswith('https://qavanin.ir/'), 'canonical civil-law source must be qavanin.ir'
+          assert manifest['retrievedUrl'].startswith('https://qavanin.ir/'), 'civil-law retrieval must originate from qavanin.ir'
           assert [x['articleKey'] for x in supplemental] == ['218مکرر','881مکرر','1313مکرر','1328مکرر']
           assert hashlib.sha256(raw).hexdigest() == manifest['seedSha256'], 'seed SHA-256 differs from manifest'
 
@@ -62,6 +64,7 @@ jobs:
               assert seed[number-1]['topic'] == 'ماده منسوخ', f'article {number} must be visibly marked repealed'
 
           print('LEGAL_SEED_GATE=PASS')
+          print('PRIMARY_SOURCE=qavanin.ir')
           print('MAIN_ARTICLES=1335')
           print('SUPPLEMENTAL_PROVISIONS=4')
           print('SEED_SHA256=' + manifest['seedSha256'])
