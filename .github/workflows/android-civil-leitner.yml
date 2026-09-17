@@ -22,6 +22,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate 1335-article legal seed
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib, json, pathlib
+          assets = pathlib.Path('android-civil-leitner/app/src/main/assets')
+          seed_path = assets / 'civil_seed.json'
+          manifest_path = assets / 'civil_source_manifest.json'
+          supplemental_path = assets / 'civil_supplemental.json'
+
+          raw = seed_path.read_bytes()
+          seed = json.loads(raw)
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          supplemental = json.loads(supplemental_path.read_text(encoding='utf-8'))
+
+          assert len(seed) == 1335, f'expected 1335 main articles, got {len(seed)}'
+          assert [x['articleNumber'] for x in seed] == list(range(1, 1336)), 'article numbering has a gap, duplicate or ordering error'
+          assert all(x.get('officialText','').strip() for x in seed), 'blank official text found'
+          assert all(x.get('verificationStatus') in {'VERIFIED_OFFICIAL','VERIFIED_RRK'} for x in seed), 'unverified article found'
+          assert all(x.get('source1','').strip() and x.get('source2','').strip() for x in seed), 'missing provenance reference'
+          assert manifest['mainArticleCount'] == 1335
+          assert manifest['firstArticleNumber'] == 1 and manifest['lastArticleNumber'] == 1335
+          assert manifest['officialSourceId'] == '12021850837713548188'
+          assert [x['articleKey'] for x in supplemental] == ['218مکرر','881مکرر','1313مکرر','1328مکرر']
+          assert hashlib.sha256(raw).hexdigest() == manifest['seedSha256'], 'seed SHA-256 differs from manifest'
+
+          checks = {
+              1: 'روزنامه رسمي',
+              2: 'پانزده روز',
+              190: 'قصد طرفين',
+              946: 'اموال غيرمنقول',
+              1041: '13 سال',
+              1335: 'توسل به قسم',
+          }
+          for number, needle in checks.items():
+              assert needle in seed[number-1]['officialText'], f'spot check failed for article {number}'
+          for number in (947,1306,1307,1308,1309,1310,1311):
+              assert seed[number-1]['topic'] == 'ماده منسوخ', f'article {number} must be visibly marked repealed'
+
+          print('LEGAL_SEED_GATE=PASS')
+          print('MAIN_ARTICLES=1335')
+          print('SUPPLEMENTAL_PROVISIONS=4')
+          print('SEED_SHA256=' + manifest['seedSha256'])
+          PY
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
