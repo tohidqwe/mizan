@@ -5,7 +5,6 @@ const OUT='android-civil-leitner/app/src/main/assets';
 const QAVANIN_TREE='https://qavanin.ir/Law/TreeText/?IDS=12145533825531226090';
 const QAVANIN_PRINT='https://qavanin.ir/Law/PrintText/83457?font=';
 const QAVANIN_PRINT_MIRROR='https://vakilfasihi.com/wp-content/uploads/2024/01/%D9%86%D8%B3%D8%AE%D9%87-%DA%86%D8%A7%D9%BE%DB%8C-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA.pdf';
-const LEGACY_SOURCE='https://dadyar.org/library/laws/commercial-code-iran';
 const AMEND_SOURCE='https://lamtakam.com/law/parliament/96314/%D9%84%D8%A7%DB%8C%D8%AD%D9%87%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%DB%8C%2B%D8%A7%D8%B5%D9%84%D8%A7%D8%AD%2B%D9%82%D8%B3%D9%85%D8%AA%DB%8C%2B%D8%A7%D8%B2%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%2B%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA';
 
 const fa='۰۱۲۳۴۵۶۷۸۹', ar='٠١٢٣٤٥٦٧٨٩';
@@ -83,22 +82,45 @@ function cueAnalysis(text,status){
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
 await fs.mkdir(OUT,{recursive:true});
-const [legacyText, amendText]=await Promise.all([getText(LEGACY_SOURCE),getText(AMEND_SOURCE)]);
-const legacy=parseSequential(legacyText,600,'Trade 1311');
-const amend=parseSequential(amendText,300,'Amendment 1347');
+const qtxtRaw=await fs.readFile('trade-qavanin-print.txt','utf8');
+const qtext=latin(qtxtRaw);
+const hasFooter=/Qavanin\.ir/i.test(qtext) && /PrintText\/83457/i.test(qtext);
+const has600=/ماده\s*600/.test(qtext);
+if(!hasFooter || !has600) throw new Error('Official Qavanin-generated print export was not verified');
+const qavaninPrintVerified=true;
+const qavaninPrintHash=sha(qtxtRaw);
 
-let qavaninPrintVerified=false, qavaninPrintHash='';
-try{
- const qtxt=await fs.readFile('trade-qavanin-print.txt','utf8');
- const q=latin(qtxt);
- const hasFooter=/Qavanin\.ir/i.test(q) && /PrintText\/83457/i.test(q);
- const has600=/ماده\s*600/.test(q);
- const hasAmend300=/ماده\s*300/.test(q);
- qavaninPrintVerified=hasFooter && has600 && hasAmend300;
- qavaninPrintHash=sha(qtxt);
- if(!qavaninPrintVerified) throw new Error('Qavanin print-export spot checks failed');
-}catch(e){
- throw new Error('Official Qavanin-generated print export was not verified: '+e.message);
+// The Qavanin-generated print export is the source for all 600 original numbered provisions,
+// including historical/repealed provisions that must remain visible in this exam bank.
+const legacy=parseSequential(qtext,600,'Qavanin Trade 1311');
+if(!/امور\s+تجارتی|امور\s+تجار[يی]/.test(legacy[20].text)) {
+ throw new Error('Qavanin historical Article 21 spot-check failed; refusing to mix the 1347 amendment sequence with the 1311 sequence');
+}
+if(!/مسئولیت\s+محدود/.test(legacy[93].text)) {
+ throw new Error('Qavanin original Article 94 spot-check failed');
+}
+
+// Prefer the amendment section from the same Qavanin export when it is embedded there.
+// If it is not embedded in the print export, use an accessible verbatim copy only for extraction,
+// while Qavanin remains the canonical legal reference and the manifest records this explicitly.
+let amend;
+let amendmentExtractionSource='Qavanin-generated print export';
+const amendMarker=qtext.search(/لایحه\s+(?:قانونی\s+)?اصلاح\s+قسمتی\s+از\s+قانون\s+تجارت/);
+if(amendMarker>=0){
+ try{
+   amend=parseSequential(qtext.slice(amendMarker),300,'Qavanin Amendment 1347');
+ }catch(e){
+   const amendText=await getText(AMEND_SOURCE);
+   amend=parseSequential(amendText,300,'Amendment 1347 fallback');
+   amendmentExtractionSource=AMEND_SOURCE;
+ }
+}else{
+ const amendText=await getText(AMEND_SOURCE);
+ amend=parseSequential(amendText,300,'Amendment 1347 fallback');
+ amendmentExtractionSource=AMEND_SOURCE;
+}
+if(!/شرکت(?:های|‌های|ها)\s+دولتی|شرکتهای\s+دولتی/.test(amend[299].text)) {
+ throw new Error('Amendment Article 300 spot-check failed');
 }
 
 const cards=[];
@@ -139,9 +161,9 @@ const manifest={
  originalLegacyStatus:'REPEALED_BY_1347_AMENDMENT_RETAINED',
  invalidity1403Retained:{trade1311:[543],amendment1347:[51,'53-71']},
  extractionFallbacks:{
-  historicalOriginalText:LEGACY_SOURCE,
-  amendmentText:AMEND_SOURCE,
-  note:'Qavanin.ir is the canonical legal reference. Because automated direct access is blocked on CI, machine extraction uses accessible text copies and requires a Qavanin-generated print export to pass provenance/spot checks.'
+  historicalOriginalText:'Qavanin-generated print export '+QAVANIN_PRINT,
+  amendmentText:amendmentExtractionSource,
+  note:'Qavanin.ir is the canonical legal reference. The 600 original provisions are extracted from a Qavanin-generated print export. The 1347 amendment is extracted from that same export when embedded; otherwise an accessible verbatim copy is used only for machine extraction and is recorded here.'
  },
  generatedAt:new Date().toISOString(),
  cardSha256:sha(JSON.stringify(cards))
