@@ -20,10 +20,10 @@ class Phd140DayPlanTest {
         assertEquals(1335, d.civilTo)
     }
 
-    @Test fun tradeCoverageEndsAt900OnDay89() {
+    @Test fun tradeCoverageSpansCurrentQavaninNumberingThrough600OnDay89() {
         val d = Phd140DayPlan.planFor(89)
-        assertEquals(891, d.tradeUnitFrom)
-        assertEquals(900, d.tradeUnitTo)
+        assertEquals(594, d.tradeUnitFrom)
+        assertEquals(600, d.tradeUnitTo)
     }
 
     @Test fun thousandVocabularyTargetEndsOnDay125() {
