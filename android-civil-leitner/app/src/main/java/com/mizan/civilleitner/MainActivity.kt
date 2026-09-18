@@ -42,6 +42,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,6 +62,7 @@ import com.mizan.civilleitner.data.DailyProgressEntity
 import com.mizan.civilleitner.data.StudyCardEntity
 import com.mizan.civilleitner.data.ProgressBackupManager
 import com.mizan.civilleitner.domain.Phd140DayPlan
+import com.mizan.civilleitner.domain.ReviewResult
 import com.mizan.civilleitner.domain.StrictReviewScheduler
 import com.mizan.civilleitner.worker.ReminderScheduler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -139,15 +141,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun completeReview(article: ArticleEntity) {
+    fun gradeReview(article: ArticleEntity, result: ReviewResult) {
         viewModelScope.launch {
-            val d = StrictReviewScheduler.complete(article.strictReviewStage)
+            val d = StrictReviewScheduler.grade(article.strictReviewStage, result)
             dao.update(article.copy(
                 reviewEnabled = true,
                 strictReviewStage = d.stage,
                 nextReviewEpochDay = d.nextReviewEpochDay,
                 lastReviewEpochDay = LocalDate.now().toEpochDay(),
                 reviewCount = article.reviewCount + 1,
+                correctCount = article.correctCount + if (result == ReviewResult.KNEW) 1 else 0,
+                incorrectCount = article.incorrectCount + if (result == ReviewResult.DONT_KNOW) 1 else 0,
                 masteryLevel = "Review cycle",
             ))
             ReminderScheduler.refreshNow(app)
@@ -183,10 +187,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun completeReview(card: StudyCardEntity) {
+    fun gradeReview(card: StudyCardEntity, result: ReviewResult) {
         viewModelScope.launch {
-            val d = StrictReviewScheduler.complete(card.strictReviewStage)
+            val d = StrictReviewScheduler.grade(card.strictReviewStage, result)
             cardDao.update(card.copy(
+                reviewEnabled = true,
                 strictReviewStage = d.stage,
                 nextReviewEpochDay = d.nextReviewEpochDay,
                 lastReviewEpochDay = LocalDate.now().toEpochDay(),
@@ -254,6 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 dayCompleted = complete,
                 updatedEpochDay = LocalDate.now().toEpochDay(),
             ))
+            ReminderScheduler.refreshNow(app)
         }
     }
 }
@@ -269,11 +275,22 @@ private enum class Tab(val label: String, val glyph: String) {
 @Composable
 private fun CivilLawRoot(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    val scope = rememberCoroutineScope()
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            scope.launch { ReminderScheduler.refreshNow(context) }
+            ReminderScheduler.scheduleAll(context)
+        }
+    }
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            ReminderScheduler.refreshNow(context)
+            ReminderScheduler.scheduleAll(context)
+        }
     }
 
     val colors = lightColorScheme(
@@ -335,7 +352,14 @@ private fun TodayScreen(vm: MainViewModel, startReview: () -> Unit) {
         }
         item { MetricCard("مرحله", plan.phase, "حداقل ${plan.mandatoryMinutes} دقیقه کار واقعی") }
         item { MetricCard("مرور اجباری", dueCount.toString(), if (overdue > 0) "$overdue مورد مدنی عقب‌افتاده" else "صف امروز") }
-        item { MetricCard("بانک قانون مدنی", "$total / ۱۳۳۵", if (total == 1335) "کامل و محلی" else "در حال ترمیم") }
+        item {
+            val inactive = (1335 - total).coerceAtLeast(0)
+            MetricCard(
+                "بانک قانون مدنی",
+                "$total ماده جاری",
+                "۱۳۳۵ شماره قانونی در منبع رسمی؛ $inactive ماده منسوخ/حذف‌شده طبق Qavanin.ir از مطالعه فعال کنار گذاشته شده است",
+            )
+        }
         item {
             Button(
                 onClick = startReview,
@@ -406,8 +430,38 @@ private fun MetricCard(title: String, value: String, subtitle: String) {
 private fun MaterialsScreen(vm: MainViewModel) {
     val articles by vm.articles.collectAsStateWithLifecycle()
     val cards by vm.studyCards.collectAsStateWithLifecycle()
+    val plan by vm.currentPlan.collectAsStateWithLifecycle()
+    val effectiveDay by vm.effectiveDay.collectAsStateWithLifecycle()
+    val dueCount by vm.dueCount.collectAsStateWithLifecycle()
     var domain by remember { mutableStateOf("CIVIL") }
     val domains = listOf("CIVIL" to "مدنی", "TRADE" to "تجارت", "FIQH" to "متون فقه", "VOCAB" to "زبان")
+
+    val todayArticles = if (dueCount > 0 || plan.civilFrom <= 0) {
+        emptyList()
+    } else {
+        articles.filter { it.articleNumber in plan.civilFrom..plan.civilTo }
+    }
+    val todayCards = if (dueCount > 0) {
+        emptyList()
+    } else {
+        when (domain) {
+            "TRADE" -> if (plan.tradeUnitFrom > 0) cards.filter { card ->
+                card.domain == "TRADE" &&
+                    (card.id.substringAfterLast(':').toIntOrNull() ?: -1) in plan.tradeUnitFrom..plan.tradeUnitTo
+            } else emptyList()
+            "VOCAB" -> if (plan.vocabFrom > 0) cards.filter {
+                it.domain == "VOCAB" && it.ordinal in plan.vocabFrom..plan.vocabTo
+            } else emptyList()
+            "FIQH" -> {
+                val fiqh = cards.filter { it.domain == "FIQH" }.sortedBy { it.ordinal }
+                if (fiqh.isEmpty()) emptyList() else {
+                    val start = ((effectiveDay - 1) * 8) % fiqh.size
+                    (0 until minOf(8, fiqh.size)).map { fiqh[(start + it) % fiqh.size] }
+                }
+            }
+            else -> emptyList()
+        }
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -418,19 +472,30 @@ private fun MaterialsScreen(vm: MainViewModel) {
         }
         if (domain == "CIVIL") {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                item { Text("قانون مدنی — متن جاری Qavanin.ir", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp)) }
-                items(articles, key = { it.articleNumber }) { article ->
+                item {
+                    Text("قانون مدنی — فقط سهم روز $effectiveDay", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp))
+                    Text(
+                        if (dueCount > 0) "قفل فعال است؛ اول مرورهای سررسیدشده را صفر کن."
+                        else if (plan.civilFrom > 0) "مواد جاری ${plan.civilFrom} تا ${plan.civilTo}؛ آینده تا تکمیل برنامه روز باز نمی‌شود."
+                        else "در این فاز مبحث جدید مدنی باز نمی‌شود؛ فقط مرور و تست.",
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                        color = if (dueCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                    )
+                }
+                items(todayArticles, key = { it.articleNumber }) { article ->
                     CivilMaterialCard(article, vm)
                 }
             }
         } else {
-            val filtered = cards.filter { it.domain == domain }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                item { Text(domains.first { it.first == domain }.second, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp)) }
-                if (filtered.isEmpty()) item {
-                    Text("بانک این منبع هنوز از خط لوله اعتبارسنجی وارد نشده است.", Modifier.padding(20.dp))
+                item {
+                    Text(domains.first { it.first == domain }.second + " — فقط سهم روز $effectiveDay", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp))
+                    if (dueCount > 0) Text("قفل فعال است؛ اول مرورهای سررسیدشده را صفر کن.", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 8.dp))
                 }
-                items(filtered, key = { it.id }) { card -> StudyMaterialCard(card, vm) }
+                if (todayCards.isEmpty() && dueCount == 0) item {
+                    Text("برای این درس در روز $effectiveDay محتوای جدیدی باز نیست؛ فقط مرور/تست برنامه‌شده انجام می‌شود.", Modifier.padding(20.dp))
+                }
+                items(todayCards, key = { it.id }) { card -> StudyMaterialCard(card, vm) }
             }
         }
     }
@@ -476,8 +541,15 @@ private fun StudyMaterialCard(card: StudyCardEntity, vm: MainViewModel) {
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(card.title, style = MaterialTheme.typography.titleMedium)
-            Text(card.prompt)
-            if (card.answer.isNotBlank()) Text(card.answer)
+            if (card.domain == "TRADE") {
+                Text("متن ماده", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                Text(card.answer)
+                Text("سؤال یادآوری", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                Text(card.prompt)
+            } else {
+                Text(card.prompt)
+                if (card.answer.isNotBlank()) Text(card.answer)
+            }
             if (card.explanation.isNotBlank()) Text(card.explanation, color = MaterialTheme.colorScheme.secondary)
             when {
                 card.explicitMastered -> Button(onClick = { vm.activateReview(card) }) { Text("بازگشت به مرور") }
@@ -520,9 +592,13 @@ private fun ReviewScreen(vm: MainViewModel) {
                         HorizontalDivider()
                         Text(article.officialText)
                         if (article.simpleExplanation.isNotBlank()) Text(article.simpleExplanation)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { vm.completeReview(article); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("مرور انجام شد") }
-                            OutlinedButton(onClick = { vm.master(article); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("مسلط شدم") }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { vm.gradeReview(article, ReviewResult.DONT_KNOW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
+                                OutlinedButton(onClick = { vm.gradeReview(article, ReviewResult.HARD); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
+                                Button(onClick = { vm.gradeReview(article, ReviewResult.KNEW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
+                            }
+                            TextButton(onClick = { vm.master(article); revealedKey = "" }, modifier = Modifier.fillMaxWidth()) { Text("مسلط شدم؛ از چرخه خارج کن") }
                         }
                     }
                 }
@@ -539,9 +615,13 @@ private fun ReviewScreen(vm: MainViewModel) {
                         HorizontalDivider()
                         Text(card.answer)
                         if (card.explanation.isNotBlank()) Text(card.explanation)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(onClick = { vm.completeReview(card); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("مرور انجام شد") }
-                            OutlinedButton(onClick = { vm.master(card); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("مسلط شدم") }
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { vm.gradeReview(card, ReviewResult.DONT_KNOW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
+                                OutlinedButton(onClick = { vm.gradeReview(card, ReviewResult.HARD); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
+                                Button(onClick = { vm.gradeReview(card, ReviewResult.KNEW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
+                            }
+                            TextButton(onClick = { vm.master(card); revealedKey = "" }, modifier = Modifier.fillMaxWidth()) { Text("مسلط شدم؛ از چرخه خارج کن") }
                         }
                     }
                 }
