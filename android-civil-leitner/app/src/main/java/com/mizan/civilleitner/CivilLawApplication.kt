@@ -23,6 +23,6 @@ class CivilLawApplication : Application() {
             StudyCardImporter.importBundledCardsIfPresent(this@CivilLawApplication, database)
             ReminderScheduler.refreshNow(this@CivilLawApplication)
         }
-        ReminderScheduler.scheduleNext(this, 8, 0)
+        ReminderScheduler.scheduleAll(this)
     }
 }
