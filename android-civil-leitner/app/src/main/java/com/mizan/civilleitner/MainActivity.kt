@@ -418,7 +418,7 @@ private fun MaterialsScreen(vm: MainViewModel) {
         }
         if (domain == "CIVIL") {
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                item { Text("قانون مدنی — ۱۳۳۵ ماده", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp)) }
+                item { Text("قانون مدنی — متن جاری Qavanin.ir", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp)) }
                 items(articles, key = { it.articleNumber }) { article ->
                     CivilMaterialCard(article, vm)
                 }
@@ -570,7 +570,7 @@ private fun ProgressScreen(vm: MainViewModel) {
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("پیشرفت", style = MaterialTheme.typography.headlineSmall) }
         item { MetricCard("روز برنامه", "$effectiveDay / ۱۴۰", "آزمون: ۱۶ بهمن ۱۴۰۵") }
-        item { MetricCard("قانون مدنی", "${articles.size} / ۱۳۳۵", "$masteredCivil ماده با تسلط صریح") }
+        item { MetricCard("قانون مدنی جاری", "${articles.size} ماده فعال", "$masteredCivil ماده با تسلط صریح؛ مواد منسوخ رسمی نمایش داده نمی‌شوند") }
         item { MetricCard("کارت‌های تجارت/فقه/زبان", cards.size.toString(), "$masteredCards کارت مسلط") }
         item { MetricCard("مرور باقی‌مانده امروز", dueCount.toString(), "تا صفر نشود محتوای جدید قفل است") }
         item {
