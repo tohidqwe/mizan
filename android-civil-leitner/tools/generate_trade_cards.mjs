@@ -8,188 +8,165 @@ const QAVANIN_PRINT_MIRROR='https://vakilfasihi.com/wp-content/uploads/2024/01/%
 
 const fa='۰۱۲۳۴۵۶۷۸۹', ar='٠١٢٣٤٥٦٧٨٩';
 const latin=s=>String(s)
- .replace(/[۰-۹]/g,c=>fa.indexOf(c))
- .replace(/[٠-٩]/g,c=>ar.indexOf(c))
- .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'');
-const decode=s=>s
- .replace(/&nbsp;/gi,' ').replace(/&zwnj;/gi,'‌').replace(/&zwj;/gi,'‍')
- .replace(/&laquo;/gi,'«').replace(/&raquo;/gi,'»').replace(/&amp;/gi,'&')
- .replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n)))
- .replace(/&#x([0-9a-f]+);/gi,(_,n)=>String.fromCodePoint(parseInt(n,16)));
-function visible(html){
- return latin(decode(html
-  .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ')
-  .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ')
-  .replace(/<(br|\/p|\/div|\/li|\/h[1-6]|\/section|\/article)>/gi,'\n')
-  .replace(/<[^>]+>/g,' ')))
-  .replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n[ \t]+/g,'\n').replace(/\n{3,}/g,'\n\n');
-}
+  .replace(/[۰-۹]/g,c=>String(fa.indexOf(c)))
+  .replace(/[٠-٩]/g,c=>String(ar.indexOf(c)))
+  .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'');
 const clean=s=>String(s||'').replace(/\s+/g,' ').trim();
-async function getText(url){
- const r=await fetch(url,{headers:{'user-agent':'Mozilla/5.0 (Mizan PhD140 legal verifier)'},redirect:'follow'});
- if(!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
- return visible(await r.text());
-}
-function parseQavaninPrint(text){
- const normalized=latin(text);
- const labels=[];
- let offset=0;
-
- for(const line of normalized.split('\n')){
-   const detection=line
-     .replace(/\p{Cf}/gu,'')
-     .replace(/\p{Z}+/gu,' ')
-     .replace(/[ \t]+/g,' ')
-     .trim();
-
-   const original=detection.match(/ماده\s*[-–—ـ:]\s*(\d{1,3})(?:\s|$)/u);
-   if(original){
-     labels.push({kind:'ORIGINAL',n:Number(original[1]),start:offset,detected:detection});
-   }else{
-     const amendment=detection.match(/ماده\s*\(\s*(\d{1,3})/u);
-     if(amendment && /(الحاق|اصلاح|منسوخ|حذف)/u.test(detection)){
-       labels.push({kind:'AMEND',n:Number(amendment[1]),start:offset,detected:detection});
-     }
-   }
-   offset += line.length + 1;
- }
-
- if(!labels.length) throw new Error('No Qavanin article headings parsed after Unicode-format normalization');
-
- const records=labels.map((x,i)=>{
-   const end=i+1<labels.length?labels[i+1].start:normalized.length;
-   let chunk=normalized.slice(x.start,end).trim();
-   // Remove only the first visual heading from the stored answer; tolerate every Unicode separator/control.
-   chunk=chunk.replace(/\p{Cf}/gu,'');
-   if(x.kind==='ORIGINAL'){
-     chunk=chunk.replace(new RegExp('^\\\\s*ماده\\\\s*[-–—ـ:]\\\\s*'+x.n+'\\\\s*[-–—ـ:.]?\\\\s*','u'),'');
-   }else{
-     chunk=chunk.replace(new RegExp('^\\\\s*ماده\\\\s*\\\\(\\\\s*'+x.n+'[^)]*\\\\)\\\\s*[-–—ـ:.]?\\\\s*','u'),'');
-   }
-   return {...x,text:clean(chunk)};
- }).filter(x=>x.text.length>=4);
-
- function exactSequence(kind,count){
-   const pool=records.filter(x=>x.kind===kind);
-   const chosen=[];
-   let expected=1;
-   for(const x of pool){
-     if(x.n===expected){
-       chosen.push({number:x.n,text:x.text});
-       expected++;
-       if(expected>count) break;
-     }
-   }
-   if(chosen.length!==count){
-     const nums=pool.slice(0,120).map(x=>x.n).join(',');
-     const samples=labels.slice(0,20).map(x=>x.kind+':'+x.n).join(',');
-     throw new Error('Qavanin '+kind+' sequence failed: '+chosen.length+'/'+count+'; pool='+nums+'; allSamples='+samples);
-   }
-   return chosen;
- }
-
- return {
-   original:exactSequence('ORIGINAL',600),
-   amendment:exactSequence('AMEND',300),
-   labelCount:labels.length,
- };
-}
-
-function legalStatus(collection,n){
- if(collection==='T1311' && n>=21 && n<=93) return 'REPEALED_BY_1347_AMENDMENT_RETAINED';
- if(collection==='T1311' && n===543) return 'DECLARED_INVALID_1403_RETAINED';
- if(collection==='L1347' && (n===51 || (n>=53 && n<=71))) return 'DECLARED_INVALID_1403_RETAINED';
- return 'CURRENT_OR_AMENDED';
-}
-function cueAnalysis(text,status){
- const cues=[];
- if(/مسئولیت\s+تضامنی|متضامناً|متضامن/.test(text)) cues.push('مسئولیت تضامنی');
- if(/باطل|بطلان/.test(text)) cues.push('بطلان');
- if(/حق\s+دارد|حق\s+خواه/.test(text)) cues.push('حق یا اختیار');
- if(/مکلف|باید|موظف/.test(text)) cues.push('تکلیف قانونی');
- if(/ممنوع|نمی\s*توان|نباید/.test(text)) cues.push('ممنوعیت یا محدودیت');
- if(/ورشکست/.test(text)) cues.push('ورشکستگی');
- if(/برات|فته|سفته|چک/.test(text)) cues.push('اسناد تجاری');
- if(/شرکت|سهام|شریک|مجمع|مدیره/.test(text)) cues.push('حقوق شرکت‌ها');
- if(/مرور\s*زمان/.test(text)) cues.push('مرور زمان');
- const retained=status!=='CURRENT_OR_AMENDED';
- return {
-  simple: retained
-   ? 'این ماده برای شناخت سیر تقنینی حذف نشده است؛ متن تاریخی را یاد بگیر اما در پاسخ به سؤالِ حکم جاری، وضعیت نسخ/بی‌اعتباری آن را حتماً ذکر کن.'
-   : 'ابتدا موضوع، شخصِ مکلف/ذی‌حق، شرط و اثر حقوقی جمله را جدا کن؛ سپس متن ماده را با همین چهار جزء بازگو کن.',
-  analytical: `کلیدهای آزمونی: ${cues.length?cues.join('، '):'موضوع + شرط + اثر حقوقی'}. دام رایج: حفظ عبارت بدون تشخیص قلمرو، شرط و ضمانت اجرا.`
- };
-}
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
+function isFooter(line){
+  const x=clean(line);
+  return !x ||
+    /^\d+\/\d+$/.test(x) ||
+    /معاونت تدوین،?\s*تنقیح و انتشار قوانین و مقررات/.test(x) ||
+    /Qavanin\.ir/i.test(x) ||
+    /qavanin\.ir\/Law\/PrintText\/83457/i.test(x);
+}
+
+function isExplicitlyInactive(label){
+  return /(منسوخ|نسخ\s*شده|حذف\s*شده|حذف[یي]|باطل\s*شده|ابطال\s*شده|ملغ[یي])/u.test(label);
+}
+
+function parseCurrentConsolidatedLaw(raw){
+  const text=latin(raw).replace(/\r/g,'');
+  const lines=text.split('\n');
+  const records=[];
+  let current=null;
+  let lastNumber=0;
+  let started=false;
+
+  const finish=()=>{
+    if(!current) return;
+    current.text=clean(current.parts.filter(Boolean).join(' '));
+    delete current.parts;
+    if(current.text.length>=4) records.push(current);
+    current=null;
+  };
+
+  for(const rawLine of lines){
+    const line=clean(rawLine.replace(/\p{Cf}/gu,'').replace(/\p{Z}+/gu,' '));
+    if(isFooter(line)) continue;
+
+    const m=line.match(/^ماده\s*(\d{1,3})(?:\s*\(([^)]*)\))?\s*[-–—ـ:]?\s*(.*)$/u);
+    if(m){
+      const n=Number(m[1]);
+      const statusLabel=clean(m[2]||'');
+      const rest=clean(m[3]||'');
+
+      if(!started){
+        if(n!==1) continue;
+        started=true;
+      }
+
+      if(n>lastNumber && n<=600){
+        finish();
+        current={number:n,statusLabel,heading:line,parts:[rest]};
+        lastNumber=n;
+        if(n===600) continue;
+        continue;
+      }
+    }
+
+    if(current) current.parts.push(line);
+  }
+  finish();
+
+  if(!records.length || records[0].number!==1 || records.at(-1).number!==600){
+    throw new Error(`Qavanin consolidated trade parse failed: first=${records[0]?.number}; last=${records.at(-1)?.number}; count=${records.length}`);
+  }
+
+  const seen=new Set(records.map(x=>x.number));
+  const omitted=[];
+  for(let n=1;n<=600;n++) if(!seen.has(n)) omitted.push(n);
+
+  const explicitInactive=records.filter(x=>isExplicitlyInactive(x.statusLabel+' '+x.heading)).map(x=>x.number);
+  const active=records.filter(x=>!explicitInactive.includes(x.number));
+
+  if(records.length<550) throw new Error(`Qavanin source appears truncated: only ${records.length} article headings detected`);
+  if(active.length<500) throw new Error(`Too few current trade articles after official-status filtering: ${active.length}`);
+
+  return {records,active,omitted,explicitInactive};
+}
+
+function cueAnalysis(text,statusLabel){
+  const cues=[];
+  if(/مسئولیت\s+تضامنی|متضامناً|متضامن/.test(text)) cues.push('مسئولیت تضامنی');
+  if(/باطل|بطلان/.test(text)) cues.push('بطلان');
+  if(/حق\s+دارد|حق\s+خواه/.test(text)) cues.push('حق یا اختیار');
+  if(/مکلف|باید|موظف/.test(text)) cues.push('تکلیف قانونی');
+  if(/ممنوع|نمی\s*توان|نباید/.test(text)) cues.push('ممنوعیت یا محدودیت');
+  if(/ورشکست/.test(text)) cues.push('ورشکستگی');
+  if(/برات|فته|سفته|چک/.test(text)) cues.push('اسناد تجاری');
+  if(/شرکت|سهام|شریک|مجمع|مدیره/.test(text)) cues.push('حقوق شرکت‌ها');
+  if(/مرور\s*زمان/.test(text)) cues.push('مرور زمان');
+
+  const provenance=statusLabel ? `وضعیت رسمی در Qavanin.ir: ${statusLabel}.` : 'این ماده در متن تنقیحی جاری Qavanin.ir درج شده است.';
+  return {
+    simple:'ماده را به چهار جزء بشکن: «موضوع»، «شخص مکلف یا ذی‌حق»، «شرط تحقق» و «اثر/ضمانت اجرا». سپس حکم را با زبان ساده خودت بازگو کن.',
+    analytical:`${provenance} کلیدهای آزمونی: ${cues.length?cues.join('، '):'موضوع + شرط + اثر حقوقی'}. دام رایج: حفظ لفظ بدون تشخیص قلمرو و استثنا.`
+  };
+}
+
 await fs.mkdir(OUT,{recursive:true});
-const qtxtRaw=await fs.readFile('trade-qavanin-print.txt','utf8');
-const qtext=latin(qtxtRaw);
-const hasFooter=/Qavanin\.ir/i.test(qtext) && /83457/.test(qtext);
-if(!hasFooter) throw new Error('Official Qavanin-generated print export provenance was not verified');
-const qavaninPrintVerified=true;
-const qavaninPrintHash=sha(qtxtRaw);
+const raw=await fs.readFile('trade-qavanin-print.txt','utf8');
+const normalized=latin(raw);
+if(!/Qavanin\.ir/i.test(normalized) || !/83457/.test(normalized)){
+  throw new Error('Qavanin-generated print-export provenance could not be verified');
+}
 
-const parsed=parseQavaninPrint(qtext);
-const legacy=parsed.original;
-const amend=parsed.amendment;
+const parsed=parseCurrentConsolidatedLaw(raw);
+const byNumber=new Map(parsed.active.map(x=>[x.number,x]));
 
-if(!/امور\s+تجارتی|امور\s+تجار[يی]/.test(legacy[20].text)) {
- throw new Error('Original Article 21 spot-check failed');
+for(const [n,needle] of [[21,'سهامی'],[82,'سهامی'],[600,'قوانین']]){
+  const text=byNumber.get(n)?.text || '';
+  if(!text.includes(needle)) throw new Error(`Qavanin trade spot-check failed for current article ${n}: ${needle}`);
 }
-if(!/مسئولیت\s+محدود/.test(legacy[93].text)) {
- throw new Error('Original Article 94 spot-check failed');
-}
-if(!/شرکت(?:های|‌های|ها)\s+دولتی|شرکتهای\s+دولتی/.test(amend[299].text)) {
- throw new Error('Amendment Article 300 spot-check failed');
-}
-const amendmentExtractionSource='Qavanin-generated print export '+QAVANIN_PRINT;
 
-const cards=[];
-for(const [collection,items] of [['T1311',legacy],['L1347',amend]]){
- for(const item of items){
-  const status=legalStatus(collection,item.number);
-  const a=cueAnalysis(item.text,status);
-  const prefix=collection==='T1311'?'قانون تجارت ۱۳۱۱':'لایحه اصلاحی ۱۳۴۷';
-  cards.push({
-   id:`TRADE:${collection}:${String(item.number).padStart(3,'0')}`,
-   domain:'TRADE',
-   ordinal:cards.length+1,
-   title:`${prefix} — ماده ${item.number}`,
-   prompt:`حکم ماده ${item.number} ${prefix} چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
-   answer:item.text,
-   explanation:`${a.simple}\n${a.analytical}\nوضعیت: ${status}`,
-   sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — مرجع canonical؛ کنترل با نسخه چاپی تولیدشده توسط سامانه',
-   sourceUrl:QAVANIN_TREE,
-   verificationStatus:status
-  });
- }
-}
-if(cards.length!==900) throw new Error(`Trade gate: expected 900 cards got ${cards.length}`);
-const ids=new Set(cards.map(x=>x.id)); if(ids.size!==900) throw new Error('Trade duplicate IDs');
-if(cards.some(x=>!x.answer.trim()||!x.explanation.trim())) throw new Error('Trade blank text/explanation');
+const cards=parsed.active.map((item,index)=>{
+  const a=cueAnalysis(item.text,item.statusLabel);
+  return {
+    id:`TRADE:CURRENT:${String(item.number).padStart(3,'0')}`,
+    domain:'TRADE',
+    ordinal:index+1,
+    title:`قانون تجارت تنقیحی — ماده ${item.number}${item.statusLabel?` (${item.statusLabel})`:''}`,
+    prompt:`حکم جاری ماده ${item.number} قانون تجارت چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
+    answer:item.text,
+    explanation:`${a.simple}\n${a.analytical}`,
+    sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری قانون تجارت',
+    sourceUrl:QAVANIN_PRINT,
+    verificationStatus:item.statusLabel ? 'QAVANIN_CURRENT_ANNOTATED' : 'QAVANIN_CURRENT'
+  };
+});
+
+const ids=new Set(cards.map(x=>x.id));
+if(ids.size!==cards.length) throw new Error('Duplicate trade IDs after Qavanin filtering');
+if(cards.some(x=>!x.answer.trim()||!x.explanation.trim())) throw new Error('Blank current trade card');
 
 const manifest={
- law:'قانون تجارت ۱۳۱۱ + لایحه قانونی اصلاح قسمتی از قانون تجارت ۱۳۴۷',
- canonicalQavaninTree:QAVANIN_TREE,
- qavaninPrintUrl:QAVANIN_PRINT,
- qavaninPrintMirrorUsedForMachineVerification:QAVANIN_PRINT_MIRROR,
- qavaninGeneratedPrintVerified,
- qavaninPrintTextSha256:qavaninPrintHash,
- originalCount:600,
- amendmentCount:300,
- totalUnits:900,
- originalLegacyArticlesRetained:'21-93',
- originalLegacyStatus:'REPEALED_BY_1347_AMENDMENT_RETAINED',
- invalidity1403Retained:{trade1311:[543],amendment1347:[51,'53-71']},
- extractionFallbacks:{
-  historicalOriginalText:'Qavanin-generated print export '+QAVANIN_PRINT,
-  amendmentText:amendmentExtractionSource,
-  note:'Both the complete 600-article 1311 law (including historical repealed 21-93) and the complete 300-article 1347 amendment are extracted from the Qavanin-generated print export. Repealed provisions are retained and visibly labeled.'
- },
- generatedAt:new Date().toISOString(),
- cardSha256:sha(JSON.stringify(cards))
+  law:'قانون تجارت - متن تنقیحی جاری',
+  policy:'Only provisions present and not explicitly inactive in the current Qavanin.ir consolidated text enter the study/review bank.',
+  canonicalQavaninTree:QAVANIN_TREE,
+  qavaninPrintUrl:QAVANIN_PRINT,
+  qavaninGeneratedPrintMirror:QAVANIN_PRINT_MIRROR,
+  qavaninGeneratedPrintVerified:true,
+  sourceHeadingCount:parsed.records.length,
+  activeCardCount:cards.length,
+  omittedByOfficialConsolidatedText:parsed.omitted,
+  explicitlyInactiveInOfficialSource:parsed.explicitInactive,
+  amendmentAnnotationsCount:parsed.records.filter(x=>x.statusLabel).length,
+  firstSourceArticle:parsed.records[0].number,
+  lastSourceArticle:parsed.records.at(-1).number,
+  sourceTextSha256:sha(raw),
+  cardSha256:sha(JSON.stringify(cards)),
+  generatedAt:new Date().toISOString()
 };
+
 await fs.writeFile(`${OUT}/trade_cards.json`,JSON.stringify(cards,null,2),'utf8');
 await fs.writeFile(`${OUT}/trade_source_manifest.json`,JSON.stringify(manifest,null,2),'utf8');
-console.log(JSON.stringify({TRADE_GATE:'PASS',count:cards.length,qavaninPrintVerified,legacyRetained:73},null,2));
+console.log(JSON.stringify({
+  TRADE_GATE:'PASS',
+  sourceHeadings:parsed.records.length,
+  activeCards:cards.length,
+  omitted:parsed.omitted,
+  explicitlyInactive:parsed.explicitInactive
+},null,2));
