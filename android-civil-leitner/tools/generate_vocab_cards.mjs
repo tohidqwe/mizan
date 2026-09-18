@@ -20,6 +20,25 @@ const examPriority = [
   'distort','distorted','plausible','spontaneous','impose','diminish','longevity','inevitable','tangible','endeavor'
 ];
 
+const curatedFallback = new Map([
+  ['distorted','تحریف‌شده؛ کژشده'],
+  ['artwork','اثر هنری'],
+  ['chloride','کلرید'],
+  ['ex','سابق؛ پیشین'],
+  ['founds','تأسیس می‌کند؛ پایه‌گذاری می‌کند'],
+  ['headquarter','مقر؛ دفتر مرکزی'],
+  ['historically','از نظر تاریخی؛ در طول تاریخ'],
+  ['individually','به‌طور فردی؛ جداگانه'],
+  ['interviewer','مصاحبه‌گر'],
+  ['morphological','ریخت‌شناختی؛ مربوط به ساخت واژه'],
+  ['multi','چند؛ چندگانه'],
+  ['philosophical','فلسفی'],
+  ['pre','پیش؛ پیشین؛ پیشوندِ قبل از'],
+  ['randomly','به‌طور تصادفی'],
+  ['tech','فناوری؛ فنی'],
+  ['trans','فرا؛ آن‌سوی؛ پیشوندِ انتقال یا عبور']
+]);
+
 const clean = (s) => String(s ?? '').replace(/\s+/g,' ').trim();
 const normalize = (s) => clean(s).toLowerCase().replace(/[’']/g,"'");
 const firstLetter = (word) => (normalize(word).match(/[a-z]/)?.[0] || 'a').toUpperCase();
@@ -70,7 +89,7 @@ const [essential2, law] = await Promise.all([
   loadDictionary('law', letters),
 ]);
 
-let missing = words.filter(w => !legalSeed.has(w) && !essential2.has(w) && !law.has(w));
+let missing = words.filter(w => !legalSeed.has(w) && !curatedFallback.has(w) && !essential2.has(w) && !law.has(w));
 const fallbackMaps = [];
 for (const dictionaryName of ['learn-english','generic-1','generic-2']) {
   if (!missing.length) break;
@@ -88,7 +107,7 @@ if (missing.length) {
 
 const examSet = new Set(examPriority);
 const cards = words.map((word,index) => {
-  const meaning = legalSeed.get(word) || law.get(word) || essential2.get(word) || fallbackMeaning(word);
+  const meaning = legalSeed.get(word) || curatedFallback.get(word) || law.get(word) || essential2.get(word) || fallbackMeaning(word);
   const isExam = examSet.has(word);
   const isLegal = legalSeed.has(word) || law.has(word);
   return {
