@@ -42,6 +42,8 @@ jobs:
           pdftotext -layout /tmp/qavanin-trade.pdf trade-qavanin-print.txt
           grep -qi 'Qavanin.ir' trade-qavanin-print.txt
           grep -q '83457' trade-qavanin-print.txt
+          echo 'QAVANIN_ARTICLE_LABEL_SAMPLES'
+          grep -n -m 40 'ماده' trade-qavanin-print.txt || true
 
       - name: Generate 900-unit trade-law bank
         run: node android-civil-leitner/tools/generate_trade_cards.mjs
