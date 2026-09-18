@@ -86,16 +86,16 @@ data class DailyProgressEntity(
 
 @Dao
 interface ArticleDao {
-    @Query("SELECT * FROM articles ORDER BY articleNumber")
+    @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' ORDER BY articleNumber")
     fun observeAll(): Flow<List<ArticleEntity>>
 
-    @Query("SELECT * FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
+    @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
     fun observeDue(today: Long): Flow<List<ArticleEntity>>
 
-    @Query("SELECT COUNT(*) FROM articles")
+    @Query("SELECT COUNT(*) FROM articles WHERE topic != 'ماده منسوخ'")
     fun observeTotalCount(): Flow<Int>
 
-    @Query("SELECT COUNT(*) FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay < :today")
+    @Query("SELECT COUNT(*) FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay < :today")
     fun observeOverdueCount(today: Long): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM articles")
@@ -110,10 +110,10 @@ interface ArticleDao {
     @Query("SELECT * FROM articles WHERE articleNumber = :number LIMIT 1")
     suspend fun getByNumber(number: Int): ArticleEntity?
 
-    @Query("SELECT COUNT(*) FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today")
+    @Query("SELECT COUNT(*) FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today")
     suspend fun dueCount(today: Long): Int
 
-    @Query("SELECT * FROM articles WHERE CAST(articleNumber AS TEXT) LIKE '%' || :query || '%' OR officialText LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%' OR topic LIKE '%' || :query || '%' ORDER BY articleNumber")
+    @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' AND (CAST(articleNumber AS TEXT) LIKE '%' || :query || '%' OR officialText LIKE '%' || :query || '%' OR keywords LIKE '%' || :query || '%' OR topic LIKE '%' || :query || '%') ORDER BY articleNumber")
     fun search(query: String): Flow<List<ArticleEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
