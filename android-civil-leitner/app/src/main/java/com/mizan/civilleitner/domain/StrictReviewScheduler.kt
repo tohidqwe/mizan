@@ -23,6 +23,22 @@ object StrictReviewScheduler {
             explicitMastered = false,
         )
 
+    fun firstStudy(
+        result: ReviewResult,
+        today: LocalDate = LocalDate.now(),
+    ): StrictReviewDecision =
+        when (result) {
+            ReviewResult.DONT_KNOW -> StrictReviewDecision(
+                enabled = true,
+                stage = 0,
+                nextReviewEpochDay = today.toEpochDay(),
+                explicitMastered = false,
+                requeueToday = true,
+            )
+            ReviewResult.HARD,
+            ReviewResult.KNEW -> activate(today)
+        }
+
     fun grade(
         currentStage: Int,
         result: ReviewResult,
