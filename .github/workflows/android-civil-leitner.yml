@@ -45,7 +45,7 @@ jobs:
           echo 'QAVANIN_ARTICLE_LABEL_SAMPLES'
           grep -n -m 40 'ماده' trade-qavanin-print.txt || true
 
-      - name: Generate 900-unit trade-law bank
+      - name: Generate current Qavanin trade-law bank
         run: node android-civil-leitner/tools/generate_trade_cards.mjs
 
 
@@ -126,19 +126,24 @@ jobs:
           assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in core)
           assert any(x['id'].startswith('VOCAB:READING:') for x in core)
 
-          assert len(trade) == 900 and tm['totalUnits'] == 900
-          original = [x for x in trade if ':T1311:' in x['id']]
-          amend = [x for x in trade if ':L1347:' in x['id']]
-          assert len(original) == 600 and len(amend) == 300
-          assert [int(x['id'].split(':')[-1]) for x in original] == list(range(1,601))
-          assert [int(x['id'].split(':')[-1]) for x in amend] == list(range(1,301))
-          assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
+          assert tm['policy'].startswith('Only provisions present')
           assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
           assert tm['qavaninPrintUrl'].startswith('https://qavanin.ir/')
           assert tm['qavaninGeneratedPrintVerified'] is True
-          legacy = [x for x in original if 21 <= int(x['id'].split(':')[-1]) <= 93]
-          assert len(legacy) == 73
-          assert all('REPEALED_BY_1347' in x['verificationStatus'] for x in legacy)
+          assert tm['sourceHeadingCount'] >= 550
+          assert tm['firstSourceArticle'] == 1 and tm['lastSourceArticle'] == 600
+          assert len(trade) == tm['activeCardCount']
+          assert 500 <= len(trade) <= 600
+          assert all(x['id'].startswith('TRADE:CURRENT:') for x in trade)
+          assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
+          trade_numbers = [int(x['id'].split(':')[-1]) for x in trade]
+          assert len(trade_numbers) == len(set(trade_numbers))
+          excluded = set(tm['omittedByOfficialConsolidatedText']) | set(tm['explicitlyInactiveInOfficialSource'])
+          assert not excluded.intersection(trade_numbers)
+          by_n = {int(x['id'].split(':')[-1]): x for x in trade}
+          assert 'سهامی' in by_n[21]['answer']
+          assert 'سهامی' in by_n[82]['answer']
+          assert 'قوانین' in by_n[600]['answer']
 
           assert len(fiqh) == 120 and fm['cardCount'] == 120 and fm['topicCount'] == 30
           assert all(x['domain'] == 'FIQH' for x in fiqh)
@@ -152,7 +157,7 @@ jobs:
 
           print('COMPLETE_CURRICULUM_GATE=PASS')
           print('ENGLISH_WORDS=1000')
-          print('TRADE_UNITS=900')
+          print('TRADE_CURRENT_UNITS=' + str(len(trade)))
           print('FIQH_CARDS=120')
           PY
 
