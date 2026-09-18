@@ -24,16 +24,43 @@ function isFooter(line){
 }
 
 function isExplicitlyInactive(label){
-  return /(منسوخ|نسخ\s*شده|حذف\s*شده|حذف[یي]|باطل\s*شده|ابطال\s*شده|ملغ[یي])/u.test(label);
+  return /(منسوخ|نسخ\s*شده|حذف\s*شده|حذف[یي]|باطل\s*شده|ابطال\s*شده|ملغ[یي]|فاقد\s*اعتبار)/u.test(label);
 }
 
-function parseCurrentConsolidatedLaw(raw){
-  const text=latin(raw).replace(/\r/g,'');
-  const lines=text.split('\n');
+function classifyHeading(line){
+  const x=clean(line.replace(/\p{Cf}/gu,'').replace(/\p{Z}+/gu,' '));
+
+  // Qavanin PDF renders ordinary articles as: "ماده - 1 ..."
+  const ordinary=x.match(/^‌?ماده\s*[-–—ـ:]?\s*(\d{1,3})(?:\s*[-–—ـ:]\s*)?(.*)$/u);
+  if(ordinary){
+    return {kind:'ORIGINAL',number:Number(ordinary[1]),statusLabel:'',rest:clean(ordinary[2]||''),heading:x};
+  }
+
+  // 1347 amendment is rendered as: "ماده (1 الحاقي -)1347/12/24 ..."
+  const paren=x.match(/^‌?ماده\s*\(\s*(\d{1,3})\s*([^)]*)\)\s*(.*)$/u);
+  if(paren){
+    const inside=clean(paren[2]||'');
+    const tail=clean(paren[3]||'');
+    if(/الحاق|اصلاح|منسوخ|حذف|ابطال|اعتبار/u.test(inside+' '+tail)){
+      const datePrefix=tail.match(/^(\d{4}[\/ˏ.-]\d{1,2}[\/ˏ.-]\d{1,2})\s*[-–—ـ:]?\s*(.*)$/u);
+      const rest=datePrefix ? clean(datePrefix[2]||'') : tail;
+      const date=datePrefix ? clean(datePrefix[1]||'') : '';
+      return {
+        kind:'AMEND',
+        number:Number(paren[1]),
+        statusLabel:clean([inside,date].filter(Boolean).join(' ')),
+        rest,
+        heading:x
+      };
+    }
+  }
+  return null;
+}
+
+function parseQavaninCurrent(raw){
+  const lines=latin(raw).replace(/\r/g,'').split('\n');
   const records=[];
   let current=null;
-  let lastNumber=0;
-  let started=false;
 
   const finish=()=>{
     if(!current) return;
@@ -47,45 +74,64 @@ function parseCurrentConsolidatedLaw(raw){
     const line=clean(rawLine.replace(/\p{Cf}/gu,'').replace(/\p{Z}+/gu,' '));
     if(isFooter(line)) continue;
 
-    const m=line.match(/^ماده\s*(\d{1,3})(?:\s*\(([^)]*)\))?\s*[-–—ـ:]?\s*(.*)$/u);
-    if(m){
-      const n=Number(m[1]);
-      const statusLabel=clean(m[2]||'');
-      const rest=clean(m[3]||'');
-
-      if(!started){
-        if(n!==1) continue;
-        started=true;
-      }
-
-      if(n>lastNumber && n<=600){
-        finish();
-        current={number:n,statusLabel,heading:line,parts:[rest]};
-        lastNumber=n;
-        if(n===600) continue;
-        continue;
-      }
+    const heading=classifyHeading(line);
+    if(heading){
+      finish();
+      current={...heading,parts:[heading.rest]};
+      continue;
     }
-
     if(current) current.parts.push(line);
   }
   finish();
 
-  if(!records.length || records[0].number!==1 || records.at(-1).number!==600){
-    throw new Error(`Qavanin consolidated trade parse failed: first=${records[0]?.number}; last=${records.at(-1)?.number}; count=${records.length}`);
+  const originalAll=records.filter(x=>x.kind==='ORIGINAL' && x.number>=1 && x.number<=600);
+  const amendAll=records.filter(x=>x.kind==='AMEND' && x.number>=1 && x.number<=300);
+
+  // Keep the first occurrence of each numbered provision in each legal collection.
+  const unique=(items)=>{
+    const m=new Map();
+    for(const x of items) if(!m.has(x.number)) m.set(x.number,x);
+    return [...m.values()].sort((a,b)=>a.number-b.number);
+  };
+  const originals=unique(originalAll);
+  const amendments=unique(amendAll);
+
+  if(originals[0]?.number!==1 || originals.at(-1)?.number!==600){
+    throw new Error(`Qavanin original-law parse failed: first=${originals[0]?.number}; last=${originals.at(-1)?.number}; count=${originals.length}`);
+  }
+  if(amendments[0]?.number!==1 || amendments.at(-1)?.number!==300){
+    throw new Error(`Qavanin 1347-amendment parse failed: first=${amendments[0]?.number}; last=${amendments.at(-1)?.number}; count=${amendments.length}`);
   }
 
-  const seen=new Set(records.map(x=>x.number));
-  const omitted=[];
-  for(let n=1;n<=600;n++) if(!seen.has(n)) omitted.push(n);
+  const originalNumbers=new Set(originals.map(x=>x.number));
+  const amendmentNumbers=new Set(amendments.map(x=>x.number));
+  const omittedOriginal=[]; for(let n=1;n<=600;n++) if(!originalNumbers.has(n)) omittedOriginal.push(n);
+  const omittedAmendment=[]; for(let n=1;n<=300;n++) if(!amendmentNumbers.has(n)) omittedAmendment.push(n);
 
-  const explicitInactive=records.filter(x=>isExplicitlyInactive(x.statusLabel+' '+x.heading)).map(x=>x.number);
-  const active=records.filter(x=>!explicitInactive.includes(x.number));
+  const inactiveOriginal=originals.filter(x=>isExplicitlyInactive(x.heading+' '+x.statusLabel)).map(x=>x.number);
+  const inactiveAmendment=amendments.filter(x=>isExplicitlyInactive(x.heading+' '+x.statusLabel)).map(x=>x.number);
 
-  if(records.length<550) throw new Error(`Qavanin source appears truncated: only ${records.length} article headings detected`);
-  if(active.length<500) throw new Error(`Too few current trade articles after official-status filtering: ${active.length}`);
+  const activeOriginal=originals.filter(x=>!inactiveOriginal.includes(x.number));
+  const activeAmendment=amendments.filter(x=>!inactiveAmendment.includes(x.number));
 
-  return {records,active,omitted,explicitInactive};
+  // Historical Articles 21..93 must not re-enter merely because their old text appears in an appendix.
+  // Qavanin consolidated publication replaces that company-law block with the 1347 amendment.
+  const currentOriginal=activeOriginal.filter(x=>x.number<21 || x.number>93);
+
+  if(currentOriginal.length<500) throw new Error(`Current original Trade Law corpus unexpectedly small: ${currentOriginal.length}`);
+  if(activeAmendment.length<250) throw new Error(`Current 1347 amendment corpus unexpectedly small: ${activeAmendment.length}`);
+
+  return {
+    records,
+    originals,
+    amendments,
+    currentOriginal,
+    currentAmendment:activeAmendment,
+    omittedOriginal,
+    omittedAmendment,
+    inactiveOriginal,
+    inactiveAmendment
+  };
 }
 
 function cueAnalysis(text,statusLabel){
@@ -99,11 +145,10 @@ function cueAnalysis(text,statusLabel){
   if(/برات|فته|سفته|چک/.test(text)) cues.push('اسناد تجاری');
   if(/شرکت|سهام|شریک|مجمع|مدیره/.test(text)) cues.push('حقوق شرکت‌ها');
   if(/مرور\s*زمان/.test(text)) cues.push('مرور زمان');
-
-  const provenance=statusLabel ? `وضعیت رسمی در Qavanin.ir: ${statusLabel}.` : 'این ماده در متن تنقیحی جاری Qavanin.ir درج شده است.';
+  const provenance=statusLabel ? `برچسب رسمی Qavanin.ir: ${statusLabel}.` : 'این ماده در متن تنقیحی جاری Qavanin.ir درج شده است.';
   return {
-    simple:'ماده را به چهار جزء بشکن: «موضوع»، «شخص مکلف یا ذی‌حق»، «شرط تحقق» و «اثر/ضمانت اجرا». سپس حکم را با زبان ساده خودت بازگو کن.',
-    analytical:`${provenance} کلیدهای آزمونی: ${cues.length?cues.join('، '):'موضوع + شرط + اثر حقوقی'}. دام رایج: حفظ لفظ بدون تشخیص قلمرو و استثنا.`
+    simple:'ماده را به چهار جزء بشکن: موضوع، شخص مکلف یا ذی‌حق، شرط تحقق و اثر/ضمانت اجرا. سپس همان حکم را با زبان ساده خودت بازگو کن.',
+    analytical:`${provenance} کلیدهای آزمونی: ${cues.length?cues.join('، '):'موضوع + شرط + اثر حقوقی'}. دام رایج: حفظ لفظ بدون تشخیص قلمرو، استثنا و ضمانت اجرا.`
   };
 }
 
@@ -114,48 +159,60 @@ if(!/Qavanin\.ir/i.test(normalized) || !/83457/.test(normalized)){
   throw new Error('Qavanin-generated print-export provenance could not be verified');
 }
 
-const parsed=parseCurrentConsolidatedLaw(raw);
-const byNumber=new Map(parsed.active.map(x=>[x.number,x]));
+const parsed=parseQavaninCurrent(raw);
 
-for(const [n,needle] of [[21,'سهامی'],[82,'سهامی'],[600,'قوانین']]){
-  const text=byNumber.get(n)?.text || '';
-  if(!text.includes(needle)) throw new Error(`Qavanin trade spot-check failed for current article ${n}: ${needle}`);
+const originalByNumber=new Map(parsed.currentOriginal.map(x=>[x.number,x]));
+const amendmentByNumber=new Map(parsed.currentAmendment.map(x=>[x.number,x]));
+
+for(const [n,needle] of [[1,'تاجر'],[20,'شركت'],[94,'مسئولیت'],[600,'قوانین']]){
+  const text=originalByNumber.get(n)?.text || '';
+  if(!text.includes(needle)) throw new Error(`Qavanin original-law spot-check failed for Article ${n}: ${needle}`);
+}
+for(const [n,needle] of [[1,'سهامي'],[300,'دولتي']]){
+  const text=amendmentByNumber.get(n)?.text || '';
+  if(!text.includes(needle)) throw new Error(`Qavanin 1347-amendment spot-check failed for Article ${n}: ${needle}`);
 }
 
-const cards=parsed.active.map((item,index)=>{
+const cards=[];
+function pushCard(collection,label,item){
   const a=cueAnalysis(item.text,item.statusLabel);
-  return {
-    id:`TRADE:CURRENT:${String(item.number).padStart(3,'0')}`,
+  cards.push({
+    id:`TRADE:${collection}:${String(item.number).padStart(3,'0')}`,
     domain:'TRADE',
-    ordinal:index+1,
-    title:`قانون تجارت تنقیحی — ماده ${item.number}${item.statusLabel?` (${item.statusLabel})`:''}`,
-    prompt:`حکم جاری ماده ${item.number} قانون تجارت چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
+    ordinal:cards.length+1,
+    title:`${label} — ماده ${item.number}${item.statusLabel?` (${item.statusLabel})`:''}`,
+    prompt:`حکم جاری ماده ${item.number} ${label} چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
     answer:item.text,
     explanation:`${a.simple}\n${a.analytical}`,
-    sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری قانون تجارت',
+    sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری',
     sourceUrl:QAVANIN_PRINT,
     verificationStatus:item.statusLabel ? 'QAVANIN_CURRENT_ANNOTATED' : 'QAVANIN_CURRENT'
-  };
-});
+  });
+}
+for(const item of parsed.currentOriginal) pushCard('T1311','قانون تجارت ۱۳۱۱',item);
+for(const item of parsed.currentAmendment) pushCard('L1347','لایحه اصلاحی ۱۳۴۷',item);
 
 const ids=new Set(cards.map(x=>x.id));
 if(ids.size!==cards.length) throw new Error('Duplicate trade IDs after Qavanin filtering');
 if(cards.some(x=>!x.answer.trim()||!x.explanation.trim())) throw new Error('Blank current trade card');
 
 const manifest={
-  law:'قانون تجارت - متن تنقیحی جاری',
-  policy:'Only provisions present and not explicitly inactive in the current Qavanin.ir consolidated text enter the study/review bank.',
+  law:'قانون تجارت ۱۳۱۱ + لایحه اصلاحی ۱۳۴۷ — فقط مقررات جاری',
+  policy:'Only provisions present/current in the Qavanin.ir consolidated publication enter the study/review bank. Repealed original Articles 21-93 are not taught separately because the 1347 amendment replaces that company-law block.',
   canonicalQavaninTree:QAVANIN_TREE,
   qavaninPrintUrl:QAVANIN_PRINT,
   qavaninGeneratedPrintMirror:QAVANIN_PRINT_MIRROR,
   qavaninGeneratedPrintVerified:true,
-  sourceHeadingCount:parsed.records.length,
+  sourceOriginalCount:parsed.originals.length,
+  sourceAmendmentCount:parsed.amendments.length,
+  currentOriginalCount:parsed.currentOriginal.length,
+  currentAmendmentCount:parsed.currentAmendment.length,
   activeCardCount:cards.length,
-  omittedByOfficialConsolidatedText:parsed.omitted,
-  explicitlyInactiveInOfficialSource:parsed.explicitInactive,
-  amendmentAnnotationsCount:parsed.records.filter(x=>x.statusLabel).length,
-  firstSourceArticle:parsed.records[0].number,
-  lastSourceArticle:parsed.records.at(-1).number,
+  historicalOriginalBlockExcluded:'21-93',
+  omittedOriginalBySource:parsed.omittedOriginal,
+  omittedAmendmentBySource:parsed.omittedAmendment,
+  explicitlyInactiveOriginal:parsed.inactiveOriginal,
+  explicitlyInactiveAmendment:parsed.inactiveAmendment,
   sourceTextSha256:sha(raw),
   cardSha256:sha(JSON.stringify(cards)),
   generatedAt:new Date().toISOString()
@@ -165,8 +222,9 @@ await fs.writeFile(`${OUT}/trade_cards.json`,JSON.stringify(cards,null,2),'utf8'
 await fs.writeFile(`${OUT}/trade_source_manifest.json`,JSON.stringify(manifest,null,2),'utf8');
 console.log(JSON.stringify({
   TRADE_GATE:'PASS',
-  sourceHeadings:parsed.records.length,
+  currentOriginal:parsed.currentOriginal.length,
+  currentAmendment:parsed.currentAmendment.length,
   activeCards:cards.length,
-  omitted:parsed.omitted,
-  explicitlyInactive:parsed.explicitInactive
+  inactiveOriginal:parsed.inactiveOriginal,
+  inactiveAmendment:parsed.inactiveAmendment
 },null,2));
