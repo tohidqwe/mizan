@@ -48,6 +48,8 @@ jobs:
       - name: Generate current Qavanin trade-law bank
         run: node android-civil-leitner/tools/generate_trade_cards.mjs
 
+      - name: Generate conceptual explanations for every active Civil Code article
+        run: node android-civil-leitner/tools/enrich_civil_explanations.mjs
 
       - name: Validate 1335-article legal seed
         shell: bash
@@ -69,6 +71,13 @@ jobs:
           assert all(x.get('officialText','').strip() for x in seed), 'blank official text found'
           assert all(x.get('verificationStatus') in {'VERIFIED_OFFICIAL','VERIFIED_RRK'} for x in seed), 'unverified article found'
           assert all(x.get('source1','').strip() and x.get('source2','').strip() for x in seed), 'missing provenance reference'
+          active = [x for x in seed if x.get('topic') != 'ماده منسوخ']
+          assert all(len(x.get('simpleExplanation','').strip()) >= 90 for x in active), 'missing/short civil conceptual explanation'
+          assert all(len(x.get('analyticalPoint','').strip()) >= 80 for x in active), 'missing/short civil analytical point'
+          assert len({x['simpleExplanation'].strip() for x in active}) == len(active), 'duplicate civil conceptual explanation'
+          assert len({x['analyticalPoint'].strip() for x in active}) == len(active), 'duplicate civil analytical point'
+          assert manifest['activeConceptExplanationCount'] == len(active)
+          assert manifest['activeAnalyticalPointCount'] == len(active)
           assert manifest['mainArticleCount'] == 1335
           assert manifest['firstArticleNumber'] == 1 and manifest['lastArticleNumber'] == 1335
           assert manifest['officialSourceId'] == '12021850837713548188'
@@ -136,7 +145,8 @@ jobs:
           assert len(trade) == tm['currentOriginalCount'] + tm['currentAmendmentCount']
           assert len(trade) >= 750
           assert all(x['id'].startswith(('TRADE:T1311:','TRADE:L1347:')) for x in trade)
-          assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
+          assert all(x['answer'].strip() and len(x['explanation'].strip()) >= 180 for x in trade)
+          assert len({x['explanation'].strip() for x in trade}) == len(trade), 'duplicate trade conceptual explanation'
 
           original = [x for x in trade if x['id'].startswith('TRADE:T1311:')]
           amend = [x for x in trade if x['id'].startswith('TRADE:L1347:')]
