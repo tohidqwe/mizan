@@ -1,9 +1,11 @@
 package com.mizan.civilleitner.worker
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -11,41 +13,49 @@ import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import androidx.work.CoroutineWorker
-import androidx.work.Data
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.WorkerParameters
 import com.mizan.civilleitner.MainActivity
 import com.mizan.civilleitner.data.AppDatabase
 import com.mizan.civilleitner.domain.Phd140DayPlan
-import java.time.Duration
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.ZonedDateTime
-import java.util.concurrent.TimeUnit
 
-class ReviewReminderWorker(
-    appContext: Context,
-    params: WorkerParameters,
-) : CoroutineWorker(appContext, params) {
-    override suspend fun doWork(): Result {
-        val hour = inputData.getInt(KEY_HOUR, 8)
-        val minute = inputData.getInt(KEY_MINUTE, 0)
-        ReminderScheduler.refreshNow(applicationContext)
-        ReminderScheduler.scheduleSlot(applicationContext, hour, minute)
-        return Result.success()
+class ReminderAlarmReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val hour = intent.getIntExtra(EXTRA_HOUR, 8)
+        val minute = intent.getIntExtra(EXTRA_MINUTE, 0)
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                ReminderScheduler.refreshNow(context.applicationContext)
+                ReminderScheduler.scheduleSlot(context.applicationContext, hour, minute)
+            } finally {
+                pendingResult.finish()
+            }
+        }
     }
 
     companion object {
-        const val KEY_HOUR = "hour"
-        const val KEY_MINUTE = "minute"
+        const val EXTRA_HOUR = "hour"
+        const val EXTRA_MINUTE = "minute"
+    }
+}
+
+class ReminderBootReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
+        ) {
+            ReminderScheduler.scheduleAll(context.applicationContext)
+        }
     }
 }
 
 object ReviewNotification {
     const val ID = 1001
-    private const val CHANNEL_ID = "exam_review_strict"
+    private const val CHANNEL_ID = "exam_review_strict_v2"
 
     fun show(context: Context, due: Int, effectiveDay: Int, dayIncomplete: Boolean) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -58,6 +68,7 @@ object ReviewNotification {
                 description = "مرورهای سررسیدشده و مأموریت روز تا اتمام کامل یادآوری می‌شوند."
                 setShowBadge(true)
                 enableVibration(true)
+                vibrationPattern = longArrayOf(0, 450, 220, 450)
             }
         )
 
@@ -98,7 +109,7 @@ object ReviewNotification {
             .setAutoCancel(false)
             .setOnlyAlertOnce(false)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setVibrate(longArrayOf(0, 450, 220, 450))
             .build()
 
@@ -140,22 +151,23 @@ object ReminderScheduler {
         val now = ZonedDateTime.now()
         var target = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
         if (!target.isAfter(now)) target = target.plusDays(1)
-        val delay = Duration.between(now, target).toMillis()
 
-        val request = OneTimeWorkRequestBuilder<ReviewReminderWorker>()
-            .setInputData(
-                Data.Builder()
-                    .putInt(ReviewReminderWorker.KEY_HOUR, hour)
-                    .putInt(ReviewReminderWorker.KEY_MINUTE, minute)
-                    .build()
-            )
-            .setInitialDelay(delay, TimeUnit.MILLISECONDS)
-            .build()
+        val alarmIntent = Intent(context, ReminderAlarmReceiver::class.java)
+            .putExtra(ReminderAlarmReceiver.EXTRA_HOUR, hour)
+            .putExtra(ReminderAlarmReceiver.EXTRA_MINUTE, minute)
+        val requestCode = hour * 100 + minute
+        val pending = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            alarmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
 
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "phd-140-reminder-%02d%02d".format(hour, minute),
-            ExistingWorkPolicy.REPLACE,
-            request,
+        val alarmManager = context.getSystemService(AlarmManager::class.java)
+        alarmManager.setAndAllowWhileIdle(
+            AlarmManager.RTC_WAKEUP,
+            target.toInstant().toEpochMilli(),
+            pending,
         )
     }
 }
