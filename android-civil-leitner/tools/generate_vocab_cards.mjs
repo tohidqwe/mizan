@@ -71,18 +71,24 @@ const [essential2, law] = await Promise.all([
 ]);
 
 let missing = words.filter(w => !legalSeed.has(w) && !essential2.has(w) && !law.has(w));
-let generic = new Map();
-if (missing.length) {
-  generic = await loadDictionary('generic-1', new Set(missing.map(firstLetter)));
-  missing = missing.filter(w => !generic.has(w));
+const fallbackMaps = [];
+for (const dictionaryName of ['learn-english','generic-1','generic-2']) {
+  if (!missing.length) break;
+  const map = await loadDictionary(dictionaryName, new Set(missing.map(firstLetter)));
+  fallbackMaps.push(map);
+  missing = missing.filter(w => !map.has(w));
+}
+function fallbackMeaning(word) {
+  for (const map of fallbackMaps) if (map.has(word)) return map.get(word);
+  return '';
 }
 if (missing.length) {
-  throw new Error(`Vocabulary translation gate failed; missing Persian meanings for ${missing.length}: ${missing.slice(0,30).join(', ')}`);
+  throw new Error(`Vocabulary translation gate failed; missing Persian meanings for ${missing.length}: ${missing.slice(0,50).join(', ')}`);
 }
 
 const examSet = new Set(examPriority);
 const cards = words.map((word,index) => {
-  const meaning = legalSeed.get(word) || law.get(word) || essential2.get(word) || generic.get(word);
+  const meaning = legalSeed.get(word) || law.get(word) || essential2.get(word) || fallbackMeaning(word);
   const isExam = examSet.has(word);
   const isLegal = legalSeed.has(word) || law.has(word);
   return {
