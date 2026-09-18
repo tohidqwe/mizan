@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
+import { buildConceptExplanation } from './legal_conceptualizer.mjs';
 
 const OUT='android-civil-leitner/app/src/main/assets';
 const QAVANIN_TREE='https://qavanin.ir/Law/TreeText/?IDS=12145533825531226090';
@@ -157,23 +158,6 @@ function parseQavaninCurrent(raw){
   };
 }
 
-function cueAnalysis(text,statusLabel){
-  const cues=[];
-  if(/مسئولیت\s+تضامنی|متضامناً|متضامن/.test(text)) cues.push('مسئولیت تضامنی');
-  if(/باطل|بطلان/.test(text)) cues.push('بطلان');
-  if(/حق\s+دارد|حق\s+خواه/.test(text)) cues.push('حق یا اختیار');
-  if(/مکلف|باید|موظف/.test(text)) cues.push('تکلیف قانونی');
-  if(/ممنوع|نمی\s*توان|نباید/.test(text)) cues.push('ممنوعیت یا محدودیت');
-  if(/ورشکست/.test(text)) cues.push('ورشکستگی');
-  if(/برات|فته|سفته|چک/.test(text)) cues.push('اسناد تجاری');
-  if(/شرکت|سهام|شریک|مجمع|مدیره/.test(text)) cues.push('حقوق شرکت‌ها');
-  if(/مرور\s*زمان/.test(text)) cues.push('مرور زمان');
-  const provenance=statusLabel ? `برچسب رسمی Qavanin.ir: ${statusLabel}.` : 'این ماده در متن تنقیحی جاری Qavanin.ir درج شده است.';
-  return {
-    analytical:`${provenance} محور این ماده برای مرور: ${cues.length?cues.join('، '):'تشخیص دقیق موضوع، شرط و اثر حقوقی از خود متن ماده'}. این بخش نکته مرور است، نه ساده‌سازی ساختگیِ ماده.`
-  };
-}
-
 await fs.mkdir(OUT,{recursive:true});
 const raw=await fs.readFile('trade-qavanin-print.txt','utf8');
 const normalized=latin(raw);
@@ -201,15 +185,20 @@ const cards=[];
 function pushCard(collection,label,item){
   const displayText = normalizeDisplayText(item.text);
   const displayStatus = normalizeDisplayText(item.statusLabel);
-  const a=cueAnalysis(displayText,displayStatus);
+  const concept=buildConceptExplanation({
+    number:item.number,
+    text:displayText,
+    law:'TRADE',
+    meta:{ section:label, chapter:'', part:'', book:'' },
+  });
   cards.push({
     id:`TRADE:${collection}:${String(item.number).padStart(3,'0')}`,
     domain:'TRADE',
     ordinal:cards.length+1,
     title:`${label} — ماده ${item.number}${displayStatus?` (${displayStatus})`:''}`,
-    prompt:`حکم جاری ماده ${item.number} ${label} چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
+    prompt:concept.recallQuestion,
     answer:displayText,
-    explanation:a.analytical,
+    explanation:`${concept.simpleExplanation}\n\n${concept.analyticalPoint}`,
     sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری',
     sourceUrl:QAVANIN_PRINT,
     verificationStatus:item.statusLabel ? 'QAVANIN_CURRENT_ANNOTATED' : 'QAVANIN_CURRENT'
@@ -221,6 +210,8 @@ for(const item of parsed.currentAmendment) pushCard('L1347','لایحه اصلا
 const ids=new Set(cards.map(x=>x.id));
 if(ids.size!==cards.length) throw new Error('Duplicate trade IDs after Qavanin filtering');
 if(cards.some(x=>!x.answer.trim()||!x.explanation.trim())) throw new Error('Blank current trade card');
+if(cards.some(x=>x.explanation.trim().length<180)) throw new Error('Trade conceptual explanation too short');
+if(new Set(cards.map(x=>x.explanation.trim())).size!==cards.length) throw new Error('Duplicate trade conceptual explanation detected');
 if(cards.some(x=>/[كيى]/u.test(x.answer))) throw new Error('Unnormalized Arabic glyph leaked into trade display text');
 if(cards.some(x=>/معامالت/u.test(x.answer))) throw new Error('Known Qavanin PDF OCR artifact leaked into trade display text');
 
