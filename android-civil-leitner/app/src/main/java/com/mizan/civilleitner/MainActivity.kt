@@ -582,33 +582,52 @@ private fun MaterialsScreen(vm: MainViewModel) {
 
 @Composable
 private fun CivilMaterialCard(article: ArticleEntity, vm: MainViewModel) {
+    var revealed by remember(article.articleNumber) { mutableStateOf(article.firstStudiedEpochDay != null) }
+    val firstExposure = article.firstStudiedEpochDay == null && !article.reviewEnabled && !article.explicitMastered
+
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("ماده ${article.articleNumber}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { vm.toggleFavorite(article) }) { Text(if (article.favorite) "★" else "☆") }
             }
-            Text(article.officialText)
-            if (article.simpleExplanation.isNotBlank()) {
-                Text("توضیح ساده", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                Text(article.simpleExplanation)
-            }
-            if (article.analyticalPoint.isNotBlank()) {
-                Text("نکته تحلیلی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                Text(article.analyticalPoint)
-            }
-            if (article.explicitMastered) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { vm.reactivate(article) }) { Text("بازگشت به مرور") }
-                    Text("مسلط ✓", modifier = Modifier.padding(top = 12.dp))
-                }
-            } else if (article.reviewEnabled) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("در چرخه مرور • مرحله ${article.strictReviewStage + 1}", modifier = Modifier.weight(1f))
-                    OutlinedButton(onClick = { vm.master(article) }) { Text("مسلط شدم") }
-                }
+
+            if (!revealed) {
+                Text(article.recallQuestion.ifBlank { "حکم ماده ${article.articleNumber} را قبل از دیدن متن بازگو کن." })
+                Button(onClick = { revealed = true }, modifier = Modifier.fillMaxWidth()) { Text("نمایش متن ماده") }
             } else {
-                Button(onClick = { vm.activateReview(article) }, modifier = Modifier.fillMaxWidth()) { Text("نیاز به مرور") }
+                Text("متن رسمی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                Text(article.officialText)
+
+                if (article.simpleExplanation.isNotBlank()) {
+                    Text("توضیح ساده اختصاصی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(article.simpleExplanation)
+                }
+                if (article.analyticalPoint.isNotBlank()) {
+                    Text("نکته تحلیلی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(article.analyticalPoint)
+                }
+
+                if (firstExposure) {
+                    Text("این ماده چقدر در ذهنت ماند؟", style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { vm.gradeFirstStudy(article, ReviewResult.DONT_KNOW) }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
+                        OutlinedButton(onClick = { vm.gradeFirstStudy(article, ReviewResult.HARD) }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
+                        Button(onClick = { vm.gradeFirstStudy(article, ReviewResult.KNEW) }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
+                    }
+                } else if (article.explicitMastered) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { vm.reactivate(article) }) { Text("بازگشت به مرور") }
+                        Text("مسلط ✓", modifier = Modifier.padding(top = 12.dp))
+                    }
+                } else if (article.reviewEnabled) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("در چرخه مرور • مرحله ${article.strictReviewStage + 1}", modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = { vm.master(article) }) { Text("مسلط شدم") }
+                    }
+                } else {
+                    Button(onClick = { vm.activateReview(article) }, modifier = Modifier.fillMaxWidth()) { Text("ورود به چرخه مرور") }
+                }
             }
             Text("منبع رسمی: Qavanin.ir", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
         }
@@ -617,23 +636,46 @@ private fun CivilMaterialCard(article: ArticleEntity, vm: MainViewModel) {
 
 @Composable
 private fun StudyMaterialCard(card: StudyCardEntity, vm: MainViewModel) {
+    var revealed by remember(card.id) { mutableStateOf(card.firstStudiedEpochDay != null) }
+    val firstExposure = card.firstStudiedEpochDay == null && !card.reviewEnabled && !card.explicitMastered
+
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Text(card.title, style = MaterialTheme.typography.titleMedium)
-            if (card.domain == "TRADE") {
-                Text("متن ماده", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                Text(card.answer)
-                Text("سؤال یادآوری", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+
+            if (!revealed) {
                 Text(card.prompt)
+                Button(onClick = { revealed = true }, modifier = Modifier.fillMaxWidth()) { Text("نمایش پاسخ") }
             } else {
-                Text(card.prompt)
-                if (card.answer.isNotBlank()) Text(card.answer)
-            }
-            if (card.explanation.isNotBlank()) Text(card.explanation, color = MaterialTheme.colorScheme.secondary)
-            when {
-                card.explicitMastered -> Button(onClick = { vm.activateReview(card) }) { Text("بازگشت به مرور") }
-                card.reviewEnabled -> OutlinedButton(onClick = { vm.master(card) }) { Text("مسلط شدم") }
-                else -> Button(onClick = { vm.activateReview(card) }) { Text("نیاز به مرور") }
+                if (card.domain == "TRADE") {
+                    Text("متن ماده", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(card.answer)
+                    if (card.explanation.isNotBlank()) {
+                        Text("نکته مرور", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                        Text(card.explanation)
+                    }
+                    Text("سؤال یادآوری", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(card.prompt)
+                } else {
+                    Text("پاسخ", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
+                    Text(card.answer)
+                    if (card.explanation.isNotBlank()) Text(card.explanation, color = MaterialTheme.colorScheme.secondary)
+                }
+
+                if (firstExposure) {
+                    Text("پاسخت چطور بود؟", style = MaterialTheme.typography.titleSmall)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedButton(onClick = { vm.gradeFirstStudy(card, ReviewResult.DONT_KNOW) }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
+                        OutlinedButton(onClick = { vm.gradeFirstStudy(card, ReviewResult.HARD) }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
+                        Button(onClick = { vm.gradeFirstStudy(card, ReviewResult.KNEW) }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
+                    }
+                } else {
+                    when {
+                        card.explicitMastered -> Button(onClick = { vm.activateReview(card) }) { Text("بازگشت به مرور") }
+                        card.reviewEnabled -> OutlinedButton(onClick = { vm.master(card) }) { Text("مسلط شدم") }
+                        else -> Button(onClick = { vm.activateReview(card) }) { Text("ورود به چرخه مرور") }
+                    }
+                }
             }
             if (card.sourceName.isNotBlank()) Text(card.sourceName, style = MaterialTheme.typography.bodySmall)
         }
