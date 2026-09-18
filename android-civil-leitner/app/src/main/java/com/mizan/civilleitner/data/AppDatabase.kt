@@ -104,6 +104,12 @@ interface ArticleDao {
     @Query("SELECT articleNumber FROM articles ORDER BY articleNumber")
     suspend fun allArticleNumbers(): List<Int>
 
+    @Query("SELECT * FROM articles ORDER BY articleNumber")
+    suspend fun snapshot(): List<ArticleEntity>
+
+    @Query("SELECT * FROM articles WHERE articleNumber = :number LIMIT 1")
+    suspend fun getByNumber(number: Int): ArticleEntity?
+
     @Query("SELECT COUNT(*) FROM articles WHERE reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today")
     suspend fun dueCount(today: Long): Int
 
@@ -137,6 +143,12 @@ interface StudyCardDao {
     @Query("SELECT COUNT(*) FROM study_cards")
     suspend fun totalCount(): Int
 
+    @Query("SELECT * FROM study_cards ORDER BY domain, ordinal")
+    suspend fun snapshot(): List<StudyCardEntity>
+
+    @Query("SELECT * FROM study_cards WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): StudyCardEntity?
+
     @Query("SELECT COUNT(*) FROM study_cards WHERE domain = :domain")
     suspend fun domainCount(domain: String): Int
 
@@ -157,6 +169,9 @@ interface PlanDao {
 
     @Query("SELECT * FROM daily_progress WHERE dayNumber = :day LIMIT 1")
     fun observeDay(day: Int): Flow<DailyProgressEntity?>
+
+    @Query("SELECT * FROM daily_progress ORDER BY dayNumber")
+    suspend fun snapshot(): List<DailyProgressEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: DailyProgressEntity)
