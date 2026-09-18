@@ -164,7 +164,7 @@ const parsed=parseQavaninCurrent(raw);
 const originalByNumber=new Map(parsed.currentOriginal.map(x=>[x.number,x]));
 const amendmentByNumber=new Map(parsed.currentAmendment.map(x=>[x.number,x]));
 
-for(const [n,needle] of [[1,'تاجر'],[20,'شركت'],[94,'مسئولیت'],[600,'قوانین']]){
+for(const [n,needle] of [[1,'تاجر'],[20,'شركت'],[94,'محدود'],[600,'قوانین']]){
   const text=originalByNumber.get(n)?.text || '';
   if(!text.includes(needle)) throw new Error(`Qavanin original-law spot-check failed for Article ${n}: ${needle}`);
 }
