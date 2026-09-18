@@ -33,31 +33,38 @@ async function getText(url){
 function parseQavaninPrint(text){
  const normalized=latin(text);
  const labels=[];
+ let offset=0;
 
- // 1311 headings render as: ماده - 1
- const originalRe=/(?:^|\n)[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*ماده[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*[-–—ـ:][\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*(\d{1,3})(?=\s|$)/gm;
- for(const m of normalized.matchAll(originalRe)){
-   labels.push({kind:'ORIGINAL', n:Number(m[1]), start:m.index+(m[0].startsWith('\n')?1:0), raw:m[0].trim()});
+ for(const line of normalized.split('\n')){
+   const detection=line
+     .replace(/\p{Cf}/gu,'')
+     .replace(/\p{Z}+/gu,' ')
+     .replace(/[ \t]+/g,' ')
+     .trim();
+
+   const original=detection.match(/ماده\s*[-–—ـ:]\s*(\d{1,3})(?:\s|$)/u);
+   if(original){
+     labels.push({kind:'ORIGINAL',n:Number(original[1]),start:offset,detected:detection});
+   }else{
+     const amendment=detection.match(/ماده\s*\(\s*(\d{1,3})/u);
+     if(amendment && /(الحاق|اصلاح|منسوخ|حذف)/u.test(detection)){
+       labels.push({kind:'AMEND',n:Number(amendment[1]),start:offset,detected:detection});
+     }
+   }
+   offset += line.length + 1;
  }
 
- // 1347 headings render as: ماده (1الحاقی 24/12/1347) or (17 اصلاحی ...)
- const amendRe=/(?:^|\n)[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*ماده[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*\([\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*(\d{1,3})/gm;
- for(const m of normalized.matchAll(amendRe)){
-   const tail=normalized.slice(m.index, m.index+100);
-   if(!/(الحاق|اصلاح|منسوخ|حذف)/.test(tail)) continue;
-   labels.push({kind:'AMEND', n:Number(m[1]), start:m.index+(m[0].startsWith('\n')?1:0), raw:m[0].trim()});
- }
-
- labels.sort((a,b)=>a.start-b.start);
- if(!labels.length) throw new Error('No Qavanin article headings parsed');
+ if(!labels.length) throw new Error('No Qavanin article headings parsed after Unicode-format normalization');
 
  const records=labels.map((x,i)=>{
    const end=i+1<labels.length?labels[i+1].start:normalized.length;
    let chunk=normalized.slice(x.start,end).trim();
+   // Remove only the first visual heading from the stored answer; tolerate every Unicode separator/control.
+   chunk=chunk.replace(/\p{Cf}/gu,'');
    if(x.kind==='ORIGINAL'){
-     chunk=chunk.replace(new RegExp('^ماده[ \\t‌]*[-–—ـ:][ \\t‌]*'+x.n+'[ \\t‌]*[-–—ـ:.]?[ \\t‌]*'),'');
+     chunk=chunk.replace(new RegExp('^\\\\s*ماده\\\\s*[-–—ـ:]\\\\s*'+x.n+'\\\\s*[-–—ـ:.]?\\\\s*','u'),'');
    }else{
-     chunk=chunk.replace(new RegExp('^ماده[ \\t‌]*\\([ \\t‌]*'+x.n+'[^)]*\\)[ \\t‌]*[-–—ـ:.]?[ \\t‌]*'),'');
+     chunk=chunk.replace(new RegExp('^\\\\s*ماده\\\\s*\\\\(\\\\s*'+x.n+'[^)]*\\\\)\\\\s*[-–—ـ:.]?\\\\s*','u'),'');
    }
    return {...x,text:clean(chunk)};
  }).filter(x=>x.text.length>=4);
@@ -74,18 +81,20 @@ function parseQavaninPrint(text){
      }
    }
    if(chosen.length!==count){
-     const nums=pool.slice(0,80).map(x=>x.n).join(',');
-     throw new Error(`Qavanin ${kind} sequence failed: ${chosen.length}/${count}; first labels=${nums}`);
+     const nums=pool.slice(0,120).map(x=>x.n).join(',');
+     const samples=labels.slice(0,20).map(x=>x.kind+':'+x.n).join(',');
+     throw new Error(\`Qavanin \${kind} sequence failed: \${chosen.length}/\${count}; pool=\${nums}; allSamples=\${samples}\`);
    }
    return chosen;
  }
 
  return {
-   original: exactSequence('ORIGINAL',600),
-   amendment: exactSequence('AMEND',300),
-   labelCount: labels.length,
+   original:exactSequence('ORIGINAL',600),
+   amendment:exactSequence('AMEND',300),
+   labelCount:labels.length,
  };
 }
+
 function legalStatus(collection,n){
  if(collection==='T1311' && n>=21 && n<=93) return 'REPEALED_BY_1347_AMENDMENT_RETAINED';
  if(collection==='T1311' && n===543) return 'DECLARED_INVALID_1403_RETAINED';
