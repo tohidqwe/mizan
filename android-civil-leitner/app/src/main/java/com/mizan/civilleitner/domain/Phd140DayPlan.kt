@@ -137,15 +137,11 @@ object Phd140DayPlan {
             dayNumber <= 89 -> {
                 val civilFrom = (dayNumber - 1) * 15 + 1
                 val civilTo = dayNumber * 15
-                val tradeFrom: Int
-                val tradeTo: Int
-                if (dayNumber <= 10) {
-                    tradeFrom = (dayNumber - 1) * 11 + 1
-                    tradeTo = dayNumber * 11
-                } else {
-                    tradeFrom = 110 + (dayNumber - 11) * 10 + 1
-                    tradeTo = 110 + (dayNumber - 10) * 10
-                }
+                // Cover the current consolidated Qavanin.ir Trade Law numbering (1..600).
+                // If the official consolidated source omits/marks an article inactive, no study card
+                // is generated for that number; the daily range simply skips it.
+                val tradeFrom = ((dayNumber - 1) * 600) / 89 + 1
+                val tradeTo = (dayNumber * 600) / 89
                 val vocabFrom = (dayNumber - 1) * 8 + 1
                 val vocabTo = dayNumber * 8
                 val tests = when {
@@ -160,8 +156,8 @@ object Phd140DayPlan {
                     mandatoryMinutes = minutes,
                     tasks = listOf(
                         "مرورهای سررسیدشده: تا صفر شدن صف",
-                        "حقوق مدنی: مواد $civilFrom تا $civilTo + متن رسمی + توضیح ساده + نکته آزمونی",
-                        "حقوق تجارت: واحدهای $tradeFrom تا $tradeTo از قانون تجارت و لایحه اصلاحی",
+                        "حقوق مدنی: مواد جاری Qavanin.ir در بازه $civilFrom تا $civilTo + توضیح ساده + نکته آزمونی",
+                        "حقوق تجارت: مواد جاری Qavanin.ir در بازه $tradeFrom تا $tradeTo؛ مواد منسوخ/حذف‌شده رسمی خودکار رد می‌شوند",
                         "متون فقه: ۲ قطعه عربی کوتاه از معاملات + ترجمه فعال + استخراج حکم + دام تستی",
                         "زبان: واژگان $vocabFrom تا $vocabTo + یک متن کوتاه",
                         "تست ترکیبی: $tests سؤال و ثبت همه خطاها",
