@@ -83,7 +83,7 @@ function parseQavaninPrint(text){
    if(chosen.length!==count){
      const nums=pool.slice(0,120).map(x=>x.n).join(',');
      const samples=labels.slice(0,20).map(x=>x.kind+':'+x.n).join(',');
-     throw new Error(\`Qavanin \${kind} sequence failed: \${chosen.length}/\${count}; pool=\${nums}; allSamples=\${samples}\`);
+     throw new Error('Qavanin '+kind+' sequence failed: '+chosen.length+'/'+count+'; pool='+nums+'; allSamples='+samples);
    }
    return chosen;
  }
