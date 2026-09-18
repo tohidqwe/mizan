@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>مدیریت درخت قانون مدنی</title>
+<style>
+body{font-family:Tahoma,Arial,sans-serif;background:#f7f4ec;color:#173c33;margin:0}
+main{max-width:980px;margin:auto;padding:24px}
+.card{background:#fffdf7;border:1px solid #ded5c1;border-radius:16px;padding:16px;margin:12px 0}
+input,textarea,select,button{font:inherit;padding:10px;border-radius:10px;border:1px solid #bfb59f}
+textarea{width:100%;min-height:200px;box-sizing:border-box}
+button{background:#173c33;color:#fff;cursor:pointer}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+small{color:#735b2b}
+</style>
+</head>
+<body><main>
+<h1>پنل مدیریت — درخت قانون مدنی</h1>
+<div class="card">
+<p>توکن مدیر/بازبین</p>
+<input id="token" type="password" style="width:100%" placeholder="Bearer token">
+<p><small>توکن در مرورگر ذخیره نمی‌شود. در نسخه نهایی پنل باید پشت دامنه HTTPS و MFA قرار گیرد.</small></p>
+</div>
+<div class="card grid">
+<input id="key" placeholder="شماره ماده، مثال: 190">
+<button onclick="loadArticle()">بارگذاری ماده</button>
+</div>
+<div class="card">
+<label>JSON نسخه محتوایی</label>
+<textarea id="payload"></textarea>
+<label>منابع (JSON array)</label>
+<textarea id="sources" style="min-height:100px">[]</textarea>
+<select id="status">
+<option>AI_DRAFT</option>
+<option>LEGAL_REVIEW</option>
+<option>APPROVED</option>
+<option>NEEDS_VERIFICATION</option>
+</select>
+<button onclick="save()">ثبت نسخه جدید</button>
+<button onclick="approve()">تأیید و انتشار</button>
+<pre id="out"></pre>
+</div>
+<script>
+const api=location.origin;
+function headers(){return {'Authorization':'Bearer '+document.getElementById('token').value,'Content-Type':'application/json'}}
+async function loadArticle(){
+ const key=document.getElementById('key').value.trim();
+ const r=await fetch(api+'/content/articles/'+encodeURIComponent(key),{headers:headers()});
+ const j=await r.json(); document.getElementById('payload').value=JSON.stringify(j,null,2); document.getElementById('out').textContent=r.status;
+}
+async function save(){
+ const key=document.getElementById('key').value.trim();
+ const body={payload:JSON.parse(document.getElementById('payload').value),sources:JSON.parse(document.getElementById('sources').value),review_status:document.getElementById('status').value};
+ const r=await fetch(api+'/admin/content/'+encodeURIComponent(key),{method:'PATCH',headers:headers(),body:JSON.stringify(body)});
+ document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);
+}
+async function approve(){
+ const key=document.getElementById('key').value.trim();
+ const r=await fetch(api+'/admin/content/'+encodeURIComponent(key)+'/approve',{method:'POST',headers:headers()});
+ document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);
+}
+</script>
+</main></body></html>

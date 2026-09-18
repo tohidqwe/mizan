@@ -1,0 +1,87 @@
+name: Civil Law Tree
+
+on:
+  push:
+    branches:
+      - product/civil-law-tree-v0.1
+    paths:
+      - 'civil-law-tree/**'
+      - '.github/workflows/civil-law-tree.yml'
+  pull_request:
+    paths:
+      - 'civil-law-tree/**'
+      - '.github/workflows/civil-law-tree.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install content fetch dependencies
+        working-directory: civil-law-tree/tools
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: civil-law-tree/tools
+        run: npx playwright install --with-deps chromium
+
+      - name: Fetch 1335 Civil Code articles from official Qavanin
+        run: node civil-law-tree/tools/fetch_civil_qavanin.mjs
+
+      - name: Build eight-course knowledge graph and per-article mind trees
+        run: node civil-law-tree/tools/build_content.mjs
+
+      - name: Audit legal corpus and graph
+        run: node civil-law-tree/tools/content_audit.mjs
+
+      - name: Validate backend syntax
+        run: python -m py_compile civil-law-tree/backend/app/main.py civil-law-tree/backend/app/models.py civil-law-tree/backend/app/security.py civil-law-tree/backend/seed_content.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Unit tests
+        run: gradle -p civil-law-tree/android testDebugUnitTest --stacktrace
+
+      - name: Build internal review APK
+        run: gradle -p civil-law-tree/android assembleDebug --stacktrace
+
+      - name: Upload internal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: civil-law-tree-internal-apk
+          path: civil-law-tree/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload legal content audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: civil-law-tree-content-audit
+          path: |
+            civil-law-tree/generated/content_manifest.json
+            civil-law-tree/generated/qavanin_civil_raw.json
+          if-no-files-found: error
