@@ -137,6 +137,9 @@ interface StudyCardDao {
     @Query("SELECT COUNT(*) FROM study_cards")
     suspend fun totalCount(): Int
 
+    @Query("SELECT COUNT(*) FROM study_cards WHERE domain = :domain")
+    suspend fun domainCount(domain: String): Int
+
     @Query("SELECT * FROM study_cards WHERE title LIKE '%' || :query || '%' OR prompt LIKE '%' || :query || '%' OR answer LIKE '%' || :query || '%' OR explanation LIKE '%' || :query || '%' ORDER BY domain, ordinal")
     fun search(query: String): Flow<List<StudyCardEntity>>
 
@@ -299,29 +302,63 @@ object VerifiedArticleImporter {
 }
 
 object StudyCardImporter {
+    private val bundledAssets = listOf(
+        "study_cards.json",
+        "vocab_cards.json",
+        "trade_cards.json",
+        "fiqh_cards.json",
+    )
+
+    /**
+     * Imports every bundled curriculum bank non-destructively. Existing review state is never
+     * overwritten; newly generated cards are repaired/added on every application start.
+     */
     suspend fun importBundledCardsIfPresent(context: Context, db: AppDatabase) {
-        if (context.assets.list("")?.contains("study_cards.json") != true) return
-        val raw = context.assets.open("study_cards.json").bufferedReader().use { it.readText() }
-        val array = JSONArray(raw)
-        val records = buildList {
-            for (i in 0 until array.length()) {
-                val o = array.getJSONObject(i)
-                add(
-                    StudyCardEntity(
-                        id = o.getString("id"),
-                        domain = o.getString("domain"),
-                        ordinal = o.getInt("ordinal"),
-                        title = o.getString("title"),
-                        prompt = o.getString("prompt"),
-                        answer = o.getString("answer"),
-                        explanation = o.optString("explanation"),
-                        sourceName = o.optString("sourceName"),
-                        sourceUrl = o.optString("sourceUrl"),
-                        verificationStatus = o.optString("verificationStatus", "CURATED"),
+        val available = context.assets.list("")?.toSet().orEmpty()
+        val seenIds = mutableSetOf<String>()
+
+        for (assetName in bundledAssets) {
+            if (assetName !in available) continue
+            val raw = context.assets.open(assetName).bufferedReader().use { it.readText() }
+            val array = JSONArray(raw)
+            val records = buildList {
+                for (i in 0 until array.length()) {
+                    val o = array.getJSONObject(i)
+                    val id = o.getString("id")
+                    val domain = o.getString("domain")
+                    val ordinal = o.getInt("ordinal")
+                    val title = o.getString("title").trim()
+                    val prompt = o.getString("prompt").trim()
+                    val answer = o.getString("answer").trim()
+
+                    require(id.isNotBlank() && seenIds.add(id)) {
+                        "Duplicate/blank study-card id across bundled assets: $id"
+                    }
+                    require(domain in setOf("TRADE", "FIQH", "VOCAB", "MOCK", "ERROR")) {
+                        "Unsupported study-card domain $domain for $id"
+                    }
+                    require(ordinal > 0 && title.isNotBlank() && prompt.isNotBlank() && answer.isNotBlank()) {
+                        "Incomplete bundled study card $id in $assetName"
+                    }
+
+                    add(
+                        StudyCardEntity(
+                            id = id,
+                            domain = domain,
+                            ordinal = ordinal,
+                            title = title,
+                            prompt = prompt,
+                            answer = answer,
+                            explanation = o.optString("explanation").trim(),
+                            sourceName = o.optString("sourceName").trim(),
+                            sourceUrl = o.optString("sourceUrl").trim(),
+                            verificationStatus = o.optString("verificationStatus", "CURATED").trim(),
+                        )
                     )
-                )
+                }
             }
+            db.studyCardDao().insertMissing(records)
         }
-        db.studyCardDao().insertMissing(records)
     }
 }
+
