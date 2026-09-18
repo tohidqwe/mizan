@@ -5,7 +5,6 @@ const OUT='android-civil-leitner/app/src/main/assets';
 const QAVANIN_TREE='https://qavanin.ir/Law/TreeText/?IDS=12145533825531226090';
 const QAVANIN_PRINT='https://qavanin.ir/Law/PrintText/83457?font=';
 const QAVANIN_PRINT_MIRROR='https://vakilfasihi.com/wp-content/uploads/2024/01/%D9%86%D8%B3%D8%AE%D9%87-%DA%86%D8%A7%D9%BE%DB%8C-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA.pdf';
-const AMEND_SOURCE='https://lamtakam.com/law/parliament/96314/%D9%84%D8%A7%DB%8C%D8%AD%D9%87%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%DB%8C%2B%D8%A7%D8%B5%D9%84%D8%A7%D8%AD%2B%D9%82%D8%B3%D9%85%D8%AA%DB%8C%2B%D8%A7%D8%B2%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%2B%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA';
 
 const fa='۰۱۲۳۴۵۶۷۸۹', ar='٠١٢٣٤٥٦٧٨٩';
 const latin=s=>String(s)
@@ -31,39 +30,61 @@ async function getText(url){
  if(!r.ok) throw new Error(`HTTP ${r.status} for ${url}`);
  return visible(await r.text());
 }
-function parseSequential(text, expectedCount, label){
+function parseQavaninPrint(text){
  const normalized=latin(text);
- const re=/(?:^|\n)\s*(?:ماده\s*[‌\u200c\-–—ـ:.)]*(\d{1,3})|(\d{1,3})\s*[‌\u200c\-–—ـ:.(]*\s*ماده)(?=\s|[-–—ـ:.(]|$)/gm;
- const matches=[...normalized.matchAll(re)].map(m=>({
-   m,
-   n:Number(m[1] || m[2]),
-   start:m.index+(m[0].startsWith('\n')?1:0)
- })).filter(x=>Number.isFinite(x.n));
- const chosen=[];
- let expected=1;
- for(const x of matches){
-   if(x.n===expected){
-     chosen.push(x);
-     expected++;
-     if(expected>expectedCount) break;
-   }
+ const labels=[];
+
+ // 1311 headings render as: ماده - 1
+ const originalRe=/(?:^|\n)[ \t‌]*ماده[ \t‌]*[-–—ـ:][ \t‌]*(\d{1,3})(?=[ \t‌]|$)/gm;
+ for(const m of normalized.matchAll(originalRe)){
+   labels.push({kind:'ORIGINAL', n:Number(m[1]), start:m.index+(m[0].startsWith('\n')?1:0), raw:m[0].trim()});
  }
- if(chosen.length!==expectedCount){
-   const seen=new Set(matches.map(x=>x.n));
-   const missing=[]; for(let n=1;n<=expectedCount;n++) if(!seen.has(n)) missing.push(n);
-   const samples=matches.slice(0,25).map(x=>x.n).join(',');
-   throw new Error(`${label} parse failed: sequential=${chosen.length}/${expectedCount}; first parsed=${samples}; missing visible=${missing.slice(0,50).join(',')}`);
+
+ // 1347 headings render as: ماده (1الحاقی 24/12/1347) or (17 اصلاحی ...)
+ const amendRe=/(?:^|\n)[ \t‌]*ماده[ \t‌]*\([ \t‌]*(\d{1,3})(?=[ \t‌]*(?:الحاق|اصلاح|منسوخ|حذفی|))/gm;
+ for(const m of normalized.matchAll(amendRe)){
+   const tail=normalized.slice(m.index, m.index+100);
+   if(!/(الحاق|اصلاح|منسوخ|حذف)/.test(tail)) continue;
+   labels.push({kind:'AMEND', n:Number(m[1]), start:m.index+(m[0].startsWith('\n')?1:0), raw:m[0].trim()});
  }
- return chosen.map((x,i)=>{
-   const end=i+1<chosen.length?chosen[i+1].start:normalized.length;
+
+ labels.sort((a,b)=>a.start-b.start);
+ if(!labels.length) throw new Error('No Qavanin article headings parsed');
+
+ const records=labels.map((x,i)=>{
+   const end=i+1<labels.length?labels[i+1].start:normalized.length;
    let chunk=normalized.slice(x.start,end).trim();
-   chunk=chunk
-     .replace(new RegExp(`^ماده\\s*[‌\\u200c\\-–—ـ:.)]*\\s*${x.n}\\s*[-–—ـ:.]?\\s*`),'')
-     .replace(new RegExp(`^${x.n}\\s*[‌\\u200c\\-–—ـ:.(]*\\s*ماده\\s*[-–—ـ:.]?\\s*`),'');
-   chunk=clean(chunk);
-   if(chunk.length<4) throw new Error(`${label} article ${x.n} blank/too short`);
-   return {number:x.n,text:chunk};
- });
+   if(x.kind==='ORIGINAL'){
+     chunk=chunk.replace(new RegExp('^ماده[ \\t‌]*[-–—ـ:][ \\t‌]*'+x.n+'[ \\t‌]*[-–—ـ:.]?[ \\t‌]*'),'');
+   }else{
+     chunk=chunk.replace(new RegExp('^ماده[ \\t‌]*\\([ \\t‌]*'+x.n+'[^)]*\\)[ \\t‌]*[-–—ـ:.]?[ \\t‌]*'),'');
+   }
+   return {...x,text:clean(chunk)};
+ }).filter(x=>x.text.length>=4);
+
+ function exactSequence(kind,count){
+   const pool=records.filter(x=>x.kind===kind);
+   const chosen=[];
+   let expected=1;
+   for(const x of pool){
+     if(x.n===expected){
+       chosen.push({number:x.n,text:x.text});
+       expected++;
+       if(expected>count) break;
+     }
+   }
+   if(chosen.length!==count){
+     const nums=pool.slice(0,80).map(x=>x.n).join(',');
+     throw new Error(`Qavanin ${kind} sequence failed: ${chosen.length}/${count}; first labels=${nums}`);
+   }
+   return chosen;
+ }
+
+ return {
+   original: exactSequence('ORIGINAL',600),
+   amendment: exactSequence('AMEND',300),
+   labelCount: labels.length,
+ };
 }
 function legalStatus(collection,n){
  if(collection==='T1311' && n>=21 && n<=93) return 'REPEALED_BY_1347_AMENDMENT_RETAINED';
@@ -100,38 +121,20 @@ if(!hasFooter) throw new Error('Official Qavanin-generated print export provenan
 const qavaninPrintVerified=true;
 const qavaninPrintHash=sha(qtxtRaw);
 
-// The Qavanin-generated print export is the source for all 600 original numbered provisions,
-// including historical/repealed provisions that must remain visible in this exam bank.
-const legacy=parseSequential(qtext,600,'Qavanin Trade 1311');
+const parsed=parseQavaninPrint(qtext);
+const legacy=parsed.original;
+const amend=parsed.amendment;
+
 if(!/امور\s+تجارتی|امور\s+تجار[يی]/.test(legacy[20].text)) {
- throw new Error('Qavanin historical Article 21 spot-check failed; refusing to mix the 1347 amendment sequence with the 1311 sequence');
+ throw new Error('Original Article 21 spot-check failed');
 }
 if(!/مسئولیت\s+محدود/.test(legacy[93].text)) {
- throw new Error('Qavanin original Article 94 spot-check failed');
-}
-
-// Prefer the amendment section from the same Qavanin export when it is embedded there.
-// If it is not embedded in the print export, use an accessible verbatim copy only for extraction,
-// while Qavanin remains the canonical legal reference and the manifest records this explicitly.
-let amend;
-let amendmentExtractionSource='Qavanin-generated print export';
-const amendMarker=qtext.search(/لایحه\s+(?:قانونی\s+)?اصلاح\s+قسمتی\s+از\s+قانون\s+تجارت/);
-if(amendMarker>=0){
- try{
-   amend=parseSequential(qtext.slice(amendMarker),300,'Qavanin Amendment 1347');
- }catch(e){
-   const amendText=await getText(AMEND_SOURCE);
-   amend=parseSequential(amendText,300,'Amendment 1347 fallback');
-   amendmentExtractionSource=AMEND_SOURCE;
- }
-}else{
- const amendText=await getText(AMEND_SOURCE);
- amend=parseSequential(amendText,300,'Amendment 1347 fallback');
- amendmentExtractionSource=AMEND_SOURCE;
+ throw new Error('Original Article 94 spot-check failed');
 }
 if(!/شرکت(?:های|‌های|ها)\s+دولتی|شرکتهای\s+دولتی/.test(amend[299].text)) {
  throw new Error('Amendment Article 300 spot-check failed');
 }
+const amendmentExtractionSource='Qavanin-generated print export '+QAVANIN_PRINT;
 
 const cards=[];
 for(const [collection,items] of [['T1311',legacy],['L1347',amend]]){
@@ -173,7 +176,7 @@ const manifest={
  extractionFallbacks:{
   historicalOriginalText:'Qavanin-generated print export '+QAVANIN_PRINT,
   amendmentText:amendmentExtractionSource,
-  note:'Qavanin.ir is the canonical legal reference. The 600 original provisions are extracted from a Qavanin-generated print export. The 1347 amendment is extracted from that same export when embedded; otherwise an accessible verbatim copy is used only for machine extraction and is recorded here.'
+  note:'Both the complete 600-article 1311 law (including historical repealed 21-93) and the complete 300-article 1347 amendment are extracted from the Qavanin-generated print export. Repealed provisions are retained and visibly labeled.'
  },
  generatedAt:new Date().toISOString(),
  cardSha256:sha(JSON.stringify(cards))
