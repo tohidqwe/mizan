@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { buildConceptExplanation } from './legal_conceptualizer.mjs';
 
 const OFFICIAL_ID = '12021850837713548188';
 const OFFICIAL_URL = `https://qavanin.ir/Law/TreeText/?IDS=${OFFICIAL_ID}`;
@@ -185,27 +186,36 @@ for (const n of [947, 1306, 1307, 1308, 1310, 1311]) {
   if (spot.get(n)?.legalStatus !== 'REPEALED') throw new Error(`Expected article ${n} to be marked REPEALED`);
 }
 
-const toSeed = (a) => ({
-  articleNumber: a.articleNumber,
-  officialText: a.officialText,
-  book: a.book || '',
-  part: a.part || '',
-  chapter: a.chapter || '',
-  section: a.section || '',
-  topic: a.legalStatus === 'REPEALED' ? 'ماده منسوخ' : a.legalStatus === 'ACTIVE_AMENDED' ? 'متن اصلاحی/الحاقی معتبر' : '',
-  keywords: [],
-  recallQuestion: `حکم و متن ماده ${a.articleNumber} قانون مدنی چیست؟`,
-  twoChoiceQuestion: '',
-  simpleExplanation: '',
-  analyticalPoint: '',
-  importantPoints: `وضعیت منبع رسمی: ${a.legalStatus}; برچسب منبع: ${a.label}`,
-  relatedArticles: [],
-  source1: `سامانه ملی قوانین و مقررات جمهوری اسلامی ایران - ${OFFICIAL_URL}`,
-  source2: RRK_REFERENCE,
-  verificationStatus: 'VERIFIED_OFFICIAL',
-  verificationDate: todayTehran,
-  sourceHash: a.contentHash,
-});
+const toSeed = (a) => {
+  const topic = a.legalStatus === 'REPEALED' ? 'ماده منسوخ' : a.legalStatus === 'ACTIVE_AMENDED' ? 'متن اصلاحی/الحاقی معتبر' : '';
+  const concept = a.legalStatus === 'REPEALED' ? null : buildConceptExplanation({
+    number: a.articleNumber,
+    text: a.officialText,
+    law: 'CIVIL',
+    meta: { book:a.book||'', part:a.part||'', chapter:a.chapter||'', section:a.section||'' },
+  });
+  return {
+    articleNumber: a.articleNumber,
+    officialText: a.officialText,
+    book: a.book || '',
+    part: a.part || '',
+    chapter: a.chapter || '',
+    section: a.section || '',
+    topic,
+    keywords: concept ? [concept.domain, concept.ruleType] : [],
+    recallQuestion: concept?.recallQuestion || `حکم و متن ماده ${a.articleNumber} قانون مدنی چیست؟`,
+    twoChoiceQuestion: '',
+    simpleExplanation: concept?.simpleExplanation || '',
+    analyticalPoint: concept?.analyticalPoint || '',
+    importantPoints: `وضعیت منبع رسمی: ${a.legalStatus}; برچسب منبع: ${a.label}`,
+    relatedArticles: [],
+    source1: `سامانه ملی قوانین و مقررات جمهوری اسلامی ایران - ${OFFICIAL_URL}`,
+    source2: RRK_REFERENCE,
+    verificationStatus: 'VERIFIED_OFFICIAL',
+    verificationDate: todayTehran,
+    sourceHash: a.contentHash,
+  };
+};
 
 const seed = mains.map(toSeed);
 const supplementalSeed = supplemental.map((a) => ({
