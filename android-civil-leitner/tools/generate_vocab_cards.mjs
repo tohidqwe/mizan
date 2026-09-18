@@ -15,6 +15,25 @@ const legalSeed = new Map([
   ['jurisdiction','صلاحیت'],['statute','قانون مصوب']
 ]);
 
+const manualMeanings = new Map([
+  ['distorted','تحریف‌شده؛ دگرگون‌شده'],
+  ['artwork','اثر هنری'],
+  ['chloride','کلرید'],
+  ['ex','سابق؛ پیشین'],
+  ['founds','بنیان می‌گذارد؛ تأسیس می‌کند'],
+  ['headquarter','مقر؛ ستاد مرکزی'],
+  ['historically','از نظر تاریخی'],
+  ['individually','به‌صورت فردی؛ جداگانه'],
+  ['interviewer','مصاحبه‌کننده'],
+  ['morphological','ریخت‌شناختی؛ صرفی'],
+  ['multi','چند؛ چندگانه'],
+  ['philosophical','فلسفی'],
+  ['pre','پیش؛ پیش از'],
+  ['randomly','به‌صورت تصادفی'],
+  ['tech','فناوری؛ فنی'],
+  ['trans','فرا؛ آن‌سوی؛ در ترکیبات به‌معنای عبور/انتقال']
+]);
+
 const examPriority = [
   'autonomy','autonomous','indispensable','beneficial','compromise','demolish','demolition',
   'distort','distorted','plausible','spontaneous','impose','diminish','longevity','inevitable','tangible','endeavor'
