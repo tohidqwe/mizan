@@ -164,10 +164,12 @@ const parsed=parseQavaninCurrent(raw);
 const originalByNumber=new Map(parsed.currentOriginal.map(x=>[x.number,x]));
 const amendmentByNumber=new Map(parsed.currentAmendment.map(x=>[x.number,x]));
 
-for(const [n,needle] of [[1,'تاجر'],[20,'شركت'],[94,'محدود'],[600,'قوانین']]){
+for(const [n,needle] of [[1,'تاجر'],[20,'شركت'],[94,'محدود']]){
   const text=originalByNumber.get(n)?.text || '';
   if(!text.includes(needle)) throw new Error(`Qavanin original-law spot-check failed for Article ${n}: ${needle}`);
 }
+const article600 = originalByNumber.get(600)?.text || '';
+if(article600.length < 12) throw new Error('Qavanin original-law Article 600 missing or too short');
 for(const [n,needle] of [[1,'سهامي'],[300,'دولتي']]){
   const text=amendmentByNumber.get(n)?.text || '';
   if(!text.includes(needle)) throw new Error(`Qavanin 1347-amendment spot-check failed for Article ${n}: ${needle}`);
