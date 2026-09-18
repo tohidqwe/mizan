@@ -130,10 +130,11 @@ jobs:
           assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
           assert tm['qavaninPrintUrl'].startswith('https://qavanin.ir/')
           assert tm['qavaninGeneratedPrintVerified'] is True
-          assert tm['sourceOriginalCount'] >= 520
-          assert tm['sourceAmendmentCount'] >= 280
+          assert tm['sourceOriginalCount'] + len(tm['omittedOriginalBySource']) == 600
+          assert tm['sourceAmendmentCount'] + len(tm['omittedAmendmentBySource']) == 300
           assert len(trade) == tm['activeCardCount']
-          assert 750 <= len(trade) <= 830
+          assert len(trade) == tm['currentOriginalCount'] + tm['currentAmendmentCount']
+          assert len(trade) >= 750
           assert all(x['id'].startswith(('TRADE:T1311:','TRADE:L1347:')) for x in trade)
           assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
 
