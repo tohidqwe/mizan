@@ -35,13 +35,13 @@ function parseQavaninPrint(text){
  const labels=[];
 
  // 1311 headings render as: ماده - 1
- const originalRe=/(?:^|\n)[ \t‌]*ماده[ \t‌]*[-–—ـ:][ \t‌]*(\d{1,3})(?=[ \t‌]|$)/gm;
+ const originalRe=/(?:^|\n)[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*ماده[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*[-–—ـ:][\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*(\d{1,3})(?=\s|$)/gm;
  for(const m of normalized.matchAll(originalRe)){
    labels.push({kind:'ORIGINAL', n:Number(m[1]), start:m.index+(m[0].startsWith('\n')?1:0), raw:m[0].trim()});
  }
 
  // 1347 headings render as: ماده (1الحاقی 24/12/1347) or (17 اصلاحی ...)
- const amendRe=/(?:^|\n)[ \t‌]*ماده[ \t‌]*\([ \t‌]*(\d{1,3})(?=[ \t‌]*(?:الحاق|اصلاح|منسوخ|حذفی|))/gm;
+ const amendRe=/(?:^|\n)[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*ماده[\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*\([\s\u200c\u200e\u200f\u202a-\u202e\u2066-\u2069]*(\d{1,3})/gm;
  for(const m of normalized.matchAll(amendRe)){
    const tail=normalized.slice(m.index, m.index+100);
    if(!/(الحاق|اصلاح|منسوخ|حذف)/.test(tail)) continue;
