@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.Uri
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -58,6 +59,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mizan.civilleitner.data.ArticleEntity
 import com.mizan.civilleitner.data.DailyProgressEntity
 import com.mizan.civilleitner.data.StudyCardEntity
+import com.mizan.civilleitner.data.ProgressBackupManager
 import com.mizan.civilleitner.domain.Phd140DayPlan
 import com.mizan.civilleitner.domain.StrictReviewScheduler
 import com.mizan.civilleitner.worker.ReminderScheduler
@@ -111,6 +113,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dayProgress = effectiveDay.flatMapLatest { planDao.observeDay(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    val backupStatus = MutableStateFlow("")
     val searchQuery = MutableStateFlow("")
     val searchArticles = searchQuery.flatMapLatest { query ->
         if (query.isBlank()) dao.observeAll() else dao.search(query.trim())
@@ -207,6 +210,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleFavorite(article: ArticleEntity) {
         viewModelScope.launch { dao.update(article.copy(favorite = !article.favorite)) }
+    }
+    fun exportBackup(uri: Uri) {
+        viewModelScope.launch {
+            backupStatus.value = "در حال ساخت نسخه پشتیبان…"
+            runCatching { ProgressBackupManager.exportTo(app, app.database, uri) }
+                .onSuccess { result ->
+                    backupStatus.value = "پشتیبان ذخیره شد: " + result.articles + " ماده، " + result.cards + " کارت، " + result.days + " روز."
+                }
+                .onFailure { error ->
+                    backupStatus.value = "خطا در پشتیبان‌گیری: " + (error.message ?: "نامشخص")
+                }
+        }
+    }
+
+    fun importBackup(uri: Uri) {
+        viewModelScope.launch {
+            backupStatus.value = "در حال بازیابی پیشرفت…"
+            runCatching { ProgressBackupManager.importFrom(app, app.database, uri) }
+                .onSuccess { result ->
+                    ReminderScheduler.refreshNow(app)
+                    backupStatus.value = "پیشرفت بازیابی شد: " + result.articles + " ماده، " + result.cards + " کارت، " + result.days + " روز."
+                }
+                .onFailure { error ->
+                    backupStatus.value = "خطا در بازیابی: " + (error.message ?: "فایل نامعتبر")
+                }
+        }
     }
 
     fun toggleTask(index: Int, taskCount: Int) {
@@ -527,8 +556,16 @@ private fun ProgressScreen(vm: MainViewModel) {
     val cards by vm.studyCards.collectAsStateWithLifecycle()
     val dueCount by vm.dueCount.collectAsStateWithLifecycle()
     val effectiveDay by vm.effectiveDay.collectAsStateWithLifecycle()
+    val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
     val masteredCivil = articles.count { it.explicitMastered }
     val masteredCards = cards.count { it.explicitMastered }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> if (uri != null) vm.exportBackup(uri) }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> if (uri != null) vm.importBackup(uri) }
 
     LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("پیشرفت", style = MaterialTheme.typography.headlineSmall) }
@@ -536,9 +573,30 @@ private fun ProgressScreen(vm: MainViewModel) {
         item { MetricCard("قانون مدنی", "${articles.size} / ۱۳۳۵", "$masteredCivil ماده با تسلط صریح") }
         item { MetricCard("کارت‌های تجارت/فقه/زبان", cards.size.toString(), "$masteredCards کارت مسلط") }
         item { MetricCard("مرور باقی‌مانده امروز", dueCount.toString(), "تا صفر نشود محتوای جدید قفل است") }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("پشتیبان پیشرفت", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "فقط وضعیت مطالعه، مرور، تسلط، یادداشت و پیشرفت ۱۴۰روزه ذخیره می‌شود؛ متن رسمی قوانین از Backup بازیابی نمی‌شود.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { exportLauncher.launch("mizan-phd1406-progress.json") },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("ذخیره پشتیبان") }
+                        OutlinedButton(
+                            onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
+                            modifier = Modifier.weight(1f),
+                        ) { Text("بازیابی") }
+                    }
+                    if (backupStatus.isNotBlank()) Text(backupStatus, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
     }
 }
-
 @Composable
 private fun SearchScreen(vm: MainViewModel) {
     val query by vm.searchQuery.collectAsStateWithLifecycle()
