@@ -76,6 +76,40 @@ data class StudyCardEntity(
     val favorite: Boolean = false,
 )
 
+data class ArticleContentPatch(
+    val articleNumber: Int,
+    val officialText: String,
+    val book: String,
+    val part: String,
+    val chapter: String,
+    val section: String,
+    val topic: String,
+    val keywords: String,
+    val recallQuestion: String,
+    val twoChoiceQuestion: String,
+    val simpleExplanation: String,
+    val analyticalPoint: String,
+    val importantPoints: String,
+    val relatedArticles: String,
+    val source1: String,
+    val source2: String,
+    val verificationStatus: String,
+    val verificationDate: String,
+)
+
+data class StudyCardContentPatch(
+    val id: String,
+    val domain: String,
+    val ordinal: Int,
+    val title: String,
+    val prompt: String,
+    val answer: String,
+    val explanation: String,
+    val sourceName: String,
+    val sourceUrl: String,
+    val verificationStatus: String,
+)
+
 @Entity(tableName = "daily_progress")
 data class DailyProgressEntity(
     @PrimaryKey val dayNumber: Int,
@@ -124,6 +158,9 @@ interface ArticleDao {
 
     @Update
     suspend fun update(item: ArticleEntity)
+
+    @Update(entity = ArticleEntity::class)
+    suspend fun updateContent(items: List<ArticleContentPatch>)
 }
 
 @Dao
@@ -158,6 +195,12 @@ interface StudyCardDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMissing(items: List<StudyCardEntity>)
 
+    @Update(entity = StudyCardEntity::class)
+    suspend fun updateContent(items: List<StudyCardContentPatch>)
+
+    @Query("DELETE FROM study_cards WHERE id NOT IN (:ids)")
+    suspend fun deleteNotBundled(ids: List<String>)
+
     @Update
     suspend fun update(item: StudyCardEntity)
 }
@@ -172,6 +215,12 @@ interface PlanDao {
 
     @Query("SELECT * FROM daily_progress ORDER BY dayNumber")
     suspend fun snapshot(): List<DailyProgressEntity>
+
+    @Query("SELECT dayNumber FROM daily_progress WHERE dayCompleted = 1 ORDER BY dayNumber")
+    suspend fun completedDaysSnapshot(): List<Int>
+
+    @Query("SELECT * FROM daily_progress WHERE dayNumber = :day LIMIT 1")
+    suspend fun getDay(day: Int): DailyProgressEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(progress: DailyProgressEntity)
@@ -310,6 +359,28 @@ object VerifiedArticleImporter {
             }
         }
         db.articleDao().insertMissing(records)
+        db.articleDao().updateContent(records.map {
+            ArticleContentPatch(
+                articleNumber = it.articleNumber,
+                officialText = it.officialText,
+                book = it.book,
+                part = it.part,
+                chapter = it.chapter,
+                section = it.section,
+                topic = it.topic,
+                keywords = it.keywords,
+                recallQuestion = it.recallQuestion,
+                twoChoiceQuestion = it.twoChoiceQuestion,
+                simpleExplanation = it.simpleExplanation,
+                analyticalPoint = it.analyticalPoint,
+                importantPoints = it.importantPoints,
+                relatedArticles = it.relatedArticles,
+                source1 = it.source1,
+                source2 = it.source2,
+                verificationStatus = it.verificationStatus,
+                verificationDate = it.verificationDate,
+            )
+        })
         require(db.articleDao().totalCount() == 1335) {
             "Civil Code startup integrity check failed after non-destructive repair"
         }
@@ -373,7 +444,24 @@ object StudyCardImporter {
                 }
             }
             db.studyCardDao().insertMissing(records)
+            db.studyCardDao().updateContent(records.map {
+                StudyCardContentPatch(
+                    id = it.id,
+                    domain = it.domain,
+                    ordinal = it.ordinal,
+                    title = it.title,
+                    prompt = it.prompt,
+                    answer = it.answer,
+                    explanation = it.explanation,
+                    sourceName = it.sourceName,
+                    sourceUrl = it.sourceUrl,
+                    verificationStatus = it.verificationStatus,
+                )
+            })
         }
+
+        require(seenIds.isNotEmpty()) { "No bundled curriculum cards found" }
+        db.studyCardDao().deleteNotBundled(seenIds.toList())
     }
 }
 
