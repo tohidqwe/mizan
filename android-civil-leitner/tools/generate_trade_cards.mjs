@@ -12,6 +12,29 @@ const latin=s=>String(s)
   .replace(/[٠-٩]/g,c=>String(ar.indexOf(c)))
   .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'');
 const clean=s=>String(s||'').replace(/\s+/g,' ').trim();
+
+const normalizeDisplayText = (s) => clean(String(s || '')
+  .replace(/ك/g, 'ک')
+  .replace(/[يى]/g, 'ی')
+  .replace(/ة/g, 'ه')
+  .replace(/ۀ/g, 'هٔ')
+  .replace(/\bمعامالت\b/g, 'معاملات')
+  .replace(/\bتجارتي\b/g, 'تجارتی')
+  .replace(/\bميشود\b/g, 'می‌شود')
+  .replace(/\bمي\s+شود\b/g, 'می‌شود')
+  .replace(/\bميباشد\b/g, 'می‌باشد')
+  .replace(/\bمي\s+باشد\b/g, 'می‌باشد')
+  .replace(/\bبموجب\b/g, 'به موجب')
+  .replace(/\bبترتيب\b/g, 'به ترتیب')
+  .replace(/\bبهيچوجه\b/g, 'به هیچ‌وجه')
+  .replace(/\bبامور\b/g, 'به امور')
+  .replace(/\bباعتبار\b/g, 'به اعتبار')
+  .replace(/\bبمبلغ\b/g, 'به مبلغ')
+  .replace(/\bبانك\b/g, 'بانک')
+  .replace(/\bالاقل\b/g, 'لااقل')
+  .replace(/\s+([،؛:.])/g, '$1')
+  .replace(/([،؛:.])(?=\S)/g, '$1 '));
+
 const sha=s=>crypto.createHash('sha256').update(s).digest('hex');
 
 function isFooter(line){
@@ -177,14 +200,16 @@ for(const [n,needle] of [[1,'سهامي'],[300,'دولتي']]){
 
 const cards=[];
 function pushCard(collection,label,item){
-  const a=cueAnalysis(item.text,item.statusLabel);
+  const displayText = normalizeDisplayText(item.text);
+  const displayStatus = normalizeDisplayText(item.statusLabel);
+  const a=cueAnalysis(displayText,displayStatus);
   cards.push({
     id:`TRADE:${collection}:${String(item.number).padStart(3,'0')}`,
     domain:'TRADE',
     ordinal:cards.length+1,
-    title:`${label} — ماده ${item.number}${item.statusLabel?` (${item.statusLabel})`:''}`,
+    title:`${label} — ماده ${item.number}${displayStatus?` (${displayStatus})`:''}`,
     prompt:`حکم جاری ماده ${item.number} ${label} چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
-    answer:item.text,
+    answer:displayText,
     explanation:`${a.simple}\n${a.analytical}`,
     sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری',
     sourceUrl:QAVANIN_PRINT,
@@ -197,6 +222,8 @@ for(const item of parsed.currentAmendment) pushCard('L1347','لایحه اصلا
 const ids=new Set(cards.map(x=>x.id));
 if(ids.size!==cards.length) throw new Error('Duplicate trade IDs after Qavanin filtering');
 if(cards.some(x=>!x.answer.trim()||!x.explanation.trim())) throw new Error('Blank current trade card');
+if(cards.some(x=>/[كيى]/u.test(x.answer))) throw new Error('Unnormalized Arabic glyph leaked into trade display text');
+if(cards.some(x=>/معامالت/u.test(x.answer))) throw new Error('Known Qavanin PDF OCR artifact leaked into trade display text');
 
 const manifest={
   law:'قانون تجارت ۱۳۱۱ + لایحه اصلاحی ۱۳۴۷ — فقط مقررات جاری',
