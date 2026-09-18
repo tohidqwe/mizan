@@ -8,7 +8,10 @@ const QAVANIN_PRINT_MIRROR='https://vakilfasihi.com/wp-content/uploads/2024/01/%
 const AMEND_SOURCE='https://lamtakam.com/law/parliament/96314/%D9%84%D8%A7%DB%8C%D8%AD%D9%87%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%DB%8C%2B%D8%A7%D8%B5%D9%84%D8%A7%D8%AD%2B%D9%82%D8%B3%D9%85%D8%AA%DB%8C%2B%D8%A7%D8%B2%2B%D9%82%D8%A7%D9%86%D9%88%D9%86%2B%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA';
 
 const fa='۰۱۲۳۴۵۶۷۸۹', ar='٠١٢٣٤٥٦٧٨٩';
-const latin=s=>String(s).replace(/[۰-۹]/g,c=>fa.indexOf(c)).replace(/[٠-٩]/g,c=>ar.indexOf(c));
+const latin=s=>String(s)
+ .replace(/[۰-۹]/g,c=>fa.indexOf(c))
+ .replace(/[٠-٩]/g,c=>ar.indexOf(c))
+ .replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,'');
 const decode=s=>s
  .replace(/&nbsp;/gi,' ').replace(/&zwnj;/gi,'‌').replace(/&zwj;/gi,'‍')
  .replace(/&laquo;/gi,'«').replace(/&raquo;/gi,'»').replace(/&amp;/gi,'&')
@@ -29,26 +32,34 @@ async function getText(url){
  return visible(await r.text());
 }
 function parseSequential(text, expectedCount, label){
- const matches=[...text.matchAll(/(?:^|\n)\s*ماده\s*[‌\u200c\-–—ـ:]?\s*(\d{1,3})(?=\s|[-–—ـ:.(])/gm)];
+ const normalized=latin(text);
+ const re=/(?:^|\n)\s*(?:ماده\s*[‌\u200c\-–—ـ:.)]*(\d{1,3})|(\d{1,3})\s*[‌\u200c\-–—ـ:.(]*\s*ماده)(?=\s|[-–—ـ:.(]|$)/gm;
+ const matches=[...normalized.matchAll(re)].map(m=>({
+   m,
+   n:Number(m[1] || m[2]),
+   start:m.index+(m[0].startsWith('\n')?1:0)
+ })).filter(x=>Number.isFinite(x.n));
  const chosen=[];
  let expected=1;
- for(const m of matches){
-   const n=Number(m[1]);
-   if(n===expected){
-     chosen.push({n,start:m.index+(m[0].startsWith('\n')?1:0),matchLen:m[0].trimStart().length});
+ for(const x of matches){
+   if(x.n===expected){
+     chosen.push(x);
      expected++;
      if(expected>expectedCount) break;
    }
  }
  if(chosen.length!==expectedCount){
-   const seen=new Set(matches.map(m=>Number(m[1])));
+   const seen=new Set(matches.map(x=>x.n));
    const missing=[]; for(let n=1;n<=expectedCount;n++) if(!seen.has(n)) missing.push(n);
-   throw new Error(`${label} parse failed: sequential=${chosen.length}/${expectedCount}; missing numbers visible=${missing.slice(0,50).join(',')}`);
+   const samples=matches.slice(0,25).map(x=>x.n).join(',');
+   throw new Error(`${label} parse failed: sequential=${chosen.length}/${expectedCount}; first parsed=${samples}; missing visible=${missing.slice(0,50).join(',')}`);
  }
  return chosen.map((x,i)=>{
-   const end=i+1<chosen.length?chosen[i+1].start:text.length;
-   let chunk=text.slice(x.start,end).trim();
-   chunk=chunk.replace(new RegExp(`^ماده\\s*[‌\\u200c\\-–—ـ:]?\\s*${x.n}\\s*[-–—ـ:.]?\\s*`),'');
+   const end=i+1<chosen.length?chosen[i+1].start:normalized.length;
+   let chunk=normalized.slice(x.start,end).trim();
+   chunk=chunk
+     .replace(new RegExp(`^ماده\\s*[‌\\u200c\\-–—ـ:.)]*\\s*${x.n}\\s*[-–—ـ:.]?\\s*`),'')
+     .replace(new RegExp(`^${x.n}\\s*[‌\\u200c\\-–—ـ:.(]*\\s*ماده\\s*[-–—ـ:.]?\\s*`),'');
    chunk=clean(chunk);
    if(chunk.length<4) throw new Error(`${label} article ${x.n} blank/too short`);
    return {number:x.n,text:chunk};
