@@ -66,10 +66,13 @@ import com.mizan.civilleitner.domain.ReviewResult
 import com.mizan.civilleitner.domain.StrictReviewScheduler
 import com.mizan.civilleitner.worker.ReminderScheduler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -88,24 +91,37 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = app.database.articleDao()
     private val cardDao = app.database.studyCardDao()
     private val planDao = app.database.planDao()
-    private val today = LocalDate.now().toEpochDay()
+    private val clockEpochDay = MutableStateFlow(LocalDate.now().toEpochDay())
+
+    init {
+        viewModelScope.launch {
+            while (isActive) {
+                val now = LocalDate.now().toEpochDay()
+                if (clockEpochDay.value != now) clockEpochDay.value = now
+                delay(60_000)
+            }
+        }
+    }
 
     val articles = dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val dueArticles = dao.observeDue(today).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val dueArticles = clockEpochDay.flatMapLatest { dao.observeDue(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val total = dao.observeTotalCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
-    val overdue = dao.observeOverdueCount(today).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    val overdue = clockEpochDay.flatMapLatest { dao.observeOverdueCount(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     val studyCards = cardDao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val dueCards = cardDao.observeDue(today).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val dueCards = clockEpochDay.flatMapLatest { cardDao.observeDue(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val dueCount = combine(dueArticles, dueCards) { a, c -> a.size + c.size }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
     private val completedDays = planDao.observeCompletedDays()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    private val calendarDay = Phd140DayPlan.calendarDay()
 
-    val effectiveDay = completedDays.map { completed ->
+    val effectiveDay = combine(completedDays, clockEpochDay) { completed, epochDay ->
+        val calendarDay = Phd140DayPlan.calendarDay(LocalDate.ofEpochDay(epochDay))
         (1..calendarDay).firstOrNull { it !in completed } ?: calendarDay
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1)
 
@@ -117,14 +133,77 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val backupStatus = MutableStateFlow("")
     val searchQuery = MutableStateFlow("")
+
+    private fun cardUnlocked(card: StudyCardEntity, plan: com.mizan.civilleitner.domain.DailyPlan, day: Int, reviewsDue: Int): Boolean {
+        if (card.firstStudiedEpochDay != null || card.reviewEnabled || card.explicitMastered) return true
+        if (reviewsDue > 0) return false
+        return when (card.domain) {
+            "TRADE" -> plan.tradeUnitFrom > 0 &&
+                (card.id.substringAfterLast(':').toIntOrNull() ?: -1) in plan.tradeUnitFrom..plan.tradeUnitTo
+            "VOCAB" -> plan.vocabFrom > 0 && card.ordinal in plan.vocabFrom..plan.vocabTo
+            "FIQH" -> {
+                val start = ((day - 1) * 8) % 120
+                val zeroBased = (card.ordinal - 1).coerceAtLeast(0)
+                (0 until 8).any { ((start + it) % 120) == zeroBased }
+            }
+            else -> false
+        }
+    }
+
     val searchArticles = searchQuery.flatMapLatest { query ->
-        if (query.isBlank()) dao.observeAll() else dao.search(query.trim())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        if (query.isBlank()) flowOf(emptyList()) else dao.search(query.trim())
+    }.combine(currentPlan) { rows, plan -> rows to plan }
+        .combine(dueCount) { (rows, plan), due ->
+            rows.filter { article ->
+                article.firstStudiedEpochDay != null || article.reviewEnabled || article.explicitMastered ||
+                    (due == 0 && plan.civilFrom > 0 && article.articleNumber in plan.civilFrom..plan.civilTo)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val searchCards = searchQuery.flatMapLatest { query ->
-        if (query.isBlank()) cardDao.observeAll() else cardDao.search(query.trim())
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        if (query.isBlank()) flowOf(emptyList()) else cardDao.search(query.trim())
+    }.combine(currentPlan) { rows, plan -> rows to plan }
+        .combine(effectiveDay) { (rows, plan), day -> Triple(rows, plan, day) }
+        .combine(dueCount) { (rows, plan, day), due ->
+            rows.filter { cardUnlocked(it, plan, day, due) }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setSearchQuery(value: String) { searchQuery.value = value }
+
+    fun gradeFirstStudy(article: ArticleEntity, result: ReviewResult) {
+        viewModelScope.launch {
+            val d = StrictReviewScheduler.firstStudy(result)
+            dao.update(article.copy(
+                reviewEnabled = true,
+                strictReviewStage = d.stage,
+                nextReviewEpochDay = d.nextReviewEpochDay,
+                explicitMastered = false,
+                lastReviewEpochDay = if (result == ReviewResult.DONT_KNOW) LocalDate.now().toEpochDay() else article.lastReviewEpochDay,
+                reviewCount = article.reviewCount + 1,
+                correctCount = article.correctCount + if (result == ReviewResult.KNEW) 1 else 0,
+                incorrectCount = article.incorrectCount + if (result == ReviewResult.DONT_KNOW) 1 else 0,
+                masteryLevel = "Review cycle",
+                firstStudiedEpochDay = article.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
+            ))
+            ReminderScheduler.refreshNow(app)
+        }
+    }
+
+    fun gradeFirstStudy(card: StudyCardEntity, result: ReviewResult) {
+        viewModelScope.launch {
+            val d = StrictReviewScheduler.firstStudy(result)
+            cardDao.update(card.copy(
+                reviewEnabled = true,
+                strictReviewStage = d.stage,
+                nextReviewEpochDay = d.nextReviewEpochDay,
+                explicitMastered = false,
+                lastReviewEpochDay = if (result == ReviewResult.DONT_KNOW) LocalDate.now().toEpochDay() else card.lastReviewEpochDay,
+                reviewCount = card.reviewCount + 1,
+                firstStudiedEpochDay = card.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
+            ))
+            ReminderScheduler.refreshNow(app)
+        }
+    }
 
     fun activateReview(article: ArticleEntity) {
         viewModelScope.launch {
