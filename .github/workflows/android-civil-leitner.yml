@@ -126,24 +126,31 @@ jobs:
           assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in core)
           assert any(x['id'].startswith('VOCAB:READING:') for x in core)
 
-          assert tm['policy'].startswith('Only provisions present')
+          assert tm['policy'].startswith('Only provisions present/current')
           assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
           assert tm['qavaninPrintUrl'].startswith('https://qavanin.ir/')
           assert tm['qavaninGeneratedPrintVerified'] is True
-          assert tm['sourceHeadingCount'] >= 550
-          assert tm['firstSourceArticle'] == 1 and tm['lastSourceArticle'] == 600
+          assert tm['sourceOriginalCount'] >= 520
+          assert tm['sourceAmendmentCount'] >= 280
           assert len(trade) == tm['activeCardCount']
-          assert 500 <= len(trade) <= 600
-          assert all(x['id'].startswith('TRADE:CURRENT:') for x in trade)
+          assert 750 <= len(trade) <= 830
+          assert all(x['id'].startswith(('TRADE:T1311:','TRADE:L1347:')) for x in trade)
           assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
-          trade_numbers = [int(x['id'].split(':')[-1]) for x in trade]
-          assert len(trade_numbers) == len(set(trade_numbers))
-          excluded = set(tm['omittedByOfficialConsolidatedText']) | set(tm['explicitlyInactiveInOfficialSource'])
-          assert not excluded.intersection(trade_numbers)
-          by_n = {int(x['id'].split(':')[-1]): x for x in trade}
-          assert 'سهامی' in by_n[21]['answer']
-          assert 'سهامی' in by_n[82]['answer']
-          assert 'قوانین' in by_n[600]['answer']
+
+          original = [x for x in trade if x['id'].startswith('TRADE:T1311:')]
+          amend = [x for x in trade if x['id'].startswith('TRADE:L1347:')]
+          original_numbers = [int(x['id'].split(':')[-1]) for x in original]
+          amend_numbers = [int(x['id'].split(':')[-1]) for x in amend]
+          assert len(original_numbers) == len(set(original_numbers))
+          assert len(amend_numbers) == len(set(amend_numbers))
+          assert not set(range(21,94)).intersection(original_numbers)
+          assert {1,20,94,600}.issubset(set(original_numbers))
+          assert {1,300}.issubset(set(amend_numbers))
+
+          inactive_original = set(tm['explicitlyInactiveOriginal'])
+          inactive_amend = set(tm['explicitlyInactiveAmendment'])
+          assert not inactive_original.intersection(original_numbers)
+          assert not inactive_amend.intersection(amend_numbers)
 
           assert len(fiqh) == 120 and fm['cardCount'] == 120 and fm['topicCount'] == 30
           assert all(x['domain'] == 'FIQH' for x in fiqh)
