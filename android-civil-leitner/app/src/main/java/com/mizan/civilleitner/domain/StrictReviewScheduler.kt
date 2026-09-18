@@ -7,10 +7,12 @@ data class StrictReviewDecision(
     val stage: Int,
     val nextReviewEpochDay: Long,
     val explicitMastered: Boolean,
+    val requeueToday: Boolean = false,
 )
 
 object StrictReviewScheduler {
-    // User-requested cadence: 24h, 48h, 3d, 1w, 14d, 28d; then every 28d until explicit mastery.
+    // Brutal review cadence requested for exam mode: 1, 2, 3, 7, 14, 28 days,
+    // then every 28 days until the learner explicitly marks mastery.
     val intervalsDays = intArrayOf(1, 2, 3, 7, 14, 28)
 
     fun activate(today: LocalDate = LocalDate.now()): StrictReviewDecision =
@@ -21,17 +23,49 @@ object StrictReviewScheduler {
             explicitMastered = false,
         )
 
-    fun complete(currentStage: Int, today: LocalDate = LocalDate.now()): StrictReviewDecision {
-        require(currentStage >= 0)
-        val newStage = (currentStage + 1).coerceAtMost(intervalsDays.lastIndex)
-        val interval = intervalsDays[newStage]
-        return StrictReviewDecision(
-            enabled = true,
-            stage = newStage,
-            nextReviewEpochDay = today.plusDays(interval.toLong()).toEpochDay(),
-            explicitMastered = false,
-        )
+    fun grade(
+        currentStage: Int,
+        result: ReviewResult,
+        today: LocalDate = LocalDate.now(),
+    ): StrictReviewDecision {
+        require(currentStage in intervalsDays.indices)
+
+        return when (result) {
+            ReviewResult.DONT_KNOW -> StrictReviewDecision(
+                enabled = true,
+                stage = 0,
+                nextReviewEpochDay = today.toEpochDay(),
+                explicitMastered = false,
+                requeueToday = true,
+            )
+
+            ReviewResult.HARD -> StrictReviewDecision(
+                enabled = true,
+                stage = currentStage,
+                nextReviewEpochDay = today.plusDays(1).toEpochDay(),
+                explicitMastered = false,
+            )
+
+            ReviewResult.KNEW -> {
+                val newStage = (currentStage + 1).coerceAtMost(intervalsDays.lastIndex)
+                val interval = if (currentStage == intervalsDays.lastIndex) {
+                    intervalsDays.last()
+                } else {
+                    intervalsDays[newStage]
+                }
+                StrictReviewDecision(
+                    enabled = true,
+                    stage = newStage,
+                    nextReviewEpochDay = today.plusDays(interval.toLong()).toEpochDay(),
+                    explicitMastered = false,
+                )
+            }
+        }
     }
+
+    // Kept for compatibility with older tests/callers; a completed review means "KNEW".
+    fun complete(currentStage: Int, today: LocalDate = LocalDate.now()): StrictReviewDecision =
+        grade(currentStage, ReviewResult.KNEW, today)
 
     fun master(): StrictReviewDecision = StrictReviewDecision(
         enabled = false,
