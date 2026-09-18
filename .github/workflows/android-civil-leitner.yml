@@ -22,6 +22,31 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Generate 1000-word English bank
+        run: node android-civil-leitner/tools/generate_vocab_cards.mjs
+
+      - name: Generate active fiqh bank
+        run: node android-civil-leitner/tools/generate_fiqh_cards.mjs
+
+      - name: Prepare Qavanin trade print verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v pdftotext >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y poppler-utils
+          fi
+          curl --fail --location --retry 3 --retry-delay 2 \
+            'https://vakilfasihi.com/wp-content/uploads/2024/01/%D9%86%D8%B3%D8%AE%D9%87-%DA%86%D8%A7%D9%BE%DB%8C-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA.pdf' \
+            -o /tmp/qavanin-trade.pdf
+          pdftotext -layout /tmp/qavanin-trade.pdf trade-qavanin-print.txt
+          grep -qi 'Qavanin.ir' trade-qavanin-print.txt
+          grep -q '83457' trade-qavanin-print.txt
+
+      - name: Generate 900-unit trade-law bank
+        run: node android-civil-leitner/tools/generate_trade_cards.mjs
+
+
       - name: Validate 1335-article legal seed
         shell: bash
         run: |
@@ -70,33 +95,63 @@ jobs:
           print('SEED_SHA256=' + manifest['seedSha256'])
           PY
 
-      - name: Validate English curriculum seed
+      - name: Validate complete exam curriculum
         shell: bash
         run: |
           python - <<'PY'
           import json, pathlib
           assets = pathlib.Path('android-civil-leitner/app/src/main/assets')
-          cards = json.loads((assets / 'study_cards.json').read_text(encoding='utf-8'))
-          manifest = json.loads((assets / 'english_curriculum_manifest.json').read_text(encoding='utf-8'))
 
-          vocab_cards = [x for x in cards if x.get('domain') == 'VOCAB']
-          ids = [x['id'] for x in cards]
-          assert len(ids) == len(set(ids)), 'duplicate study-card id'
-          assert len(vocab_cards) >= 33, f'expected at least 33 initial English cards, got {len(vocab_cards)}'
-          assert manifest['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذره‌بین'
-          assert manifest['primaryReference']['providedByUser'] is True
-          assert manifest['leitner']['intervalDays'] == [1,2,3,7,14,28]
-          assert manifest['leitner']['repeatAfterFinalDays'] == 28
-          assert manifest['leitner']['exitOnlyOnExplicitMastered'] is True
-          assert set(manifest['examFrequencyPolicy']['initialAuditedYears']) >= {1396,1397,1400,1401,1402}
-          assert len(manifest['initialHighFrequencyFamilies']) >= 14
-          assert any(x['id'].startswith('VOCAB:FREQ:') for x in cards)
-          assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in cards)
-          assert any(x['id'].startswith('VOCAB:READING:') for x in cards)
+          core = json.loads((assets / 'study_cards.json').read_text(encoding='utf-8'))
+          english = json.loads((assets / 'vocab_cards.json').read_text(encoding='utf-8'))
+          em = json.loads((assets / 'english_curriculum_manifest.json').read_text(encoding='utf-8'))
+          vm = json.loads((assets / 'vocab_manifest.json').read_text(encoding='utf-8'))
+          trade = json.loads((assets / 'trade_cards.json').read_text(encoding='utf-8'))
+          tm = json.loads((assets / 'trade_source_manifest.json').read_text(encoding='utf-8'))
+          fiqh = json.loads((assets / 'fiqh_cards.json').read_text(encoding='utf-8'))
+          fm = json.loads((assets / 'fiqh_manifest.json').read_text(encoding='utf-8'))
 
-          print('ENGLISH_CURRICULUM_GATE=PASS')
-          print('INITIAL_ENGLISH_CARDS=' + str(len(vocab_cards)))
-          print('PRIMARY_REFERENCE=' + manifest['primaryReference']['name'])
+          assert em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذرهبین' or em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذره‌بین'
+          assert em['primaryReference']['providedByUser'] is True
+          assert em['leitner']['intervalDays'] == [1,2,3,7,14,28]
+          assert len(english) == 1000
+          assert vm['count'] == 1000 and vm['allCardsHavePersianMeaning'] is True
+          assert [x['ordinal'] for x in english] == list(range(1,1001))
+          assert all(x['domain'] == 'VOCAB' and x['answer'].strip() for x in english)
+          assert len({x['id'] for x in english}) == 1000
+          assert len(em['initialHighFrequencyFamilies']) >= 14
+          assert any(x['id'].startswith('VOCAB:FREQ:') for x in core)
+          assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in core)
+          assert any(x['id'].startswith('VOCAB:READING:') for x in core)
+
+          assert len(trade) == 900 and tm['totalUnits'] == 900
+          original = [x for x in trade if ':T1311:' in x['id']]
+          amend = [x for x in trade if ':L1347:' in x['id']]
+          assert len(original) == 600 and len(amend) == 300
+          assert [int(x['id'].split(':')[-1]) for x in original] == list(range(1,601))
+          assert [int(x['id'].split(':')[-1]) for x in amend] == list(range(1,301))
+          assert all(x['answer'].strip() and x['explanation'].strip() for x in trade)
+          assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
+          assert tm['qavaninPrintUrl'].startswith('https://qavanin.ir/')
+          assert tm['qavaninGeneratedPrintVerified'] is True
+          legacy = [x for x in original if 21 <= int(x['id'].split(':')[-1]) <= 93]
+          assert len(legacy) == 73
+          assert all('REPEALED_BY_1347' in x['verificationStatus'] for x in legacy)
+
+          assert len(fiqh) == 120 and fm['cardCount'] == 120 and fm['topicCount'] == 30
+          assert all(x['domain'] == 'FIQH' for x in fiqh)
+          assert all(x['prompt'].strip() and x['answer'].strip() and x['explanation'].strip() for x in fiqh)
+          required = {'متاجر و اقسام کسب','بیع فضولی','خیارات','رهن','ضمان','حواله','اجاره','وکالت'}
+          assert required.issubset(set(fm['requiredTopics']))
+          assert fm['modernCommercialTranslationsCopied'] is False
+
+          ids = [x['id'] for x in core + english + trade + fiqh]
+          assert len(ids) == len(set(ids)), 'duplicate IDs across bundled curriculum assets'
+
+          print('COMPLETE_CURRICULUM_GATE=PASS')
+          print('ENGLISH_WORDS=1000')
+          print('TRADE_UNITS=900')
+          print('FIQH_CARDS=120')
           PY
 
       - name: Set up JDK 17
