@@ -170,8 +170,7 @@ function cueAnalysis(text,statusLabel){
   if(/مرور\s*زمان/.test(text)) cues.push('مرور زمان');
   const provenance=statusLabel ? `برچسب رسمی Qavanin.ir: ${statusLabel}.` : 'این ماده در متن تنقیحی جاری Qavanin.ir درج شده است.';
   return {
-    simple:'ماده را به چهار جزء بشکن: موضوع، شخص مکلف یا ذی‌حق، شرط تحقق و اثر/ضمانت اجرا. سپس همان حکم را با زبان ساده خودت بازگو کن.',
-    analytical:`${provenance} کلیدهای آزمونی: ${cues.length?cues.join('، '):'موضوع + شرط + اثر حقوقی'}. دام رایج: حفظ لفظ بدون تشخیص قلمرو، استثنا و ضمانت اجرا.`
+    analytical:`${provenance} محور این ماده برای مرور: ${cues.length?cues.join('، '):'تشخیص دقیق موضوع، شرط و اثر حقوقی از خود متن ماده'}. این بخش نکته مرور است، نه ساده‌سازی ساختگیِ ماده.`
   };
 }
 
@@ -210,7 +209,7 @@ function pushCard(collection,label,item){
     title:`${label} — ماده ${item.number}${displayStatus?` (${displayStatus})`:''}`,
     prompt:`حکم جاری ماده ${item.number} ${label} چیست؟ موضوع، شرط و اثر آن را قبل از دیدن پاسخ بازگو کن.`,
     answer:displayText,
-    explanation:`${a.simple}\n${a.analytical}`,
+    explanation:a.analytical,
     sourceName:'سامانه ملی قوانین و مقررات (Qavanin.ir) — متن تنقیحی جاری',
     sourceUrl:QAVANIN_PRINT,
     verificationStatus:item.statusLabel ? 'QAVANIN_CURRENT_ANNOTATED' : 'QAVANIN_CURRENT'
