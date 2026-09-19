@@ -110,6 +110,33 @@ data class StudyCardContentPatch(
     val verificationStatus: String,
 )
 
+@Entity(tableName = "reminders")
+data class ReminderEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val itemType: String,
+    val itemId: String,
+    val title: String,
+    val body: String,
+    val dueAtMillis: Long,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+    val soundUri: String = "",
+    val enabled: Boolean = true,
+    val firedCount: Int = 0,
+)
+
+@Entity(tableName = "planner_tasks")
+data class PlannerTaskEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val details: String = "",
+    val persianDate: String,
+    val timeText: String,
+    val dueAtMillis: Long,
+    val soundUri: String = "",
+    val completed: Boolean = false,
+    val createdAtMillis: Long = System.currentTimeMillis(),
+)
+
 @Entity(tableName = "daily_progress")
 data class DailyProgressEntity(
     @PrimaryKey val dayNumber: Int,
@@ -120,13 +147,13 @@ data class DailyProgressEntity(
 
 @Dao
 interface ArticleDao {
-    @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' ORDER BY articleNumber")
+    @Query("SELECT * FROM articles ORDER BY articleNumber")
     fun observeAll(): Flow<List<ArticleEntity>>
 
     @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
     fun observeDue(today: Long): Flow<List<ArticleEntity>>
 
-    @Query("SELECT COUNT(*) FROM articles WHERE topic != 'ماده منسوخ'")
+    @Query("SELECT COUNT(*) FROM articles")
     fun observeTotalCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay < :today")
@@ -206,6 +233,45 @@ interface StudyCardDao {
 }
 
 @Dao
+interface ReminderDao {
+    @Query("SELECT * FROM reminders WHERE enabled = 1 AND dueAtMillis <= :now ORDER BY dueAtMillis ASC")
+    fun observeDue(now: Long): Flow<List<ReminderEntity>>
+
+    @Query("SELECT * FROM reminders WHERE enabled = 1 ORDER BY dueAtMillis ASC")
+    fun observeActive(): Flow<List<ReminderEntity>>
+
+    @Query("SELECT * FROM reminders WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): ReminderEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(item: ReminderEntity): Long
+
+    @Update
+    suspend fun update(item: ReminderEntity)
+
+    @Query("DELETE FROM reminders WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
+@Dao
+interface PlannerDao {
+    @Query("SELECT * FROM planner_tasks ORDER BY completed ASC, dueAtMillis ASC")
+    fun observeAll(): Flow<List<PlannerTaskEntity>>
+
+    @Query("SELECT * FROM planner_tasks WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): PlannerTaskEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(item: PlannerTaskEntity): Long
+
+    @Update
+    suspend fun update(item: PlannerTaskEntity)
+
+    @Query("DELETE FROM planner_tasks WHERE id = :id")
+    suspend fun delete(id: Long)
+}
+
+@Dao
 interface PlanDao {
     @Query("SELECT dayNumber FROM daily_progress WHERE dayCompleted = 1 ORDER BY dayNumber")
     fun observeCompletedDays(): Flow<List<Int>>
@@ -227,14 +293,22 @@ interface PlanDao {
 }
 
 @Database(
-    entities = [ArticleEntity::class, StudyCardEntity::class, DailyProgressEntity::class],
-    version = 2,
+    entities = [
+        ArticleEntity::class,
+        StudyCardEntity::class,
+        DailyProgressEntity::class,
+        ReminderEntity::class,
+        PlannerTaskEntity::class,
+    ],
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
     abstract fun studyCardDao(): StudyCardDao
     abstract fun planDao(): PlanDao
+    abstract fun reminderDao(): ReminderDao
+    abstract fun plannerDao(): PlannerDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -283,12 +357,48 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS reminders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        itemType TEXT NOT NULL,
+                        itemId TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        body TEXT NOT NULL,
+                        dueAtMillis INTEGER NOT NULL,
+                        createdAtMillis INTEGER NOT NULL,
+                        soundUri TEXT NOT NULL,
+                        enabled INTEGER NOT NULL,
+                        firedCount INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS planner_tasks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        title TEXT NOT NULL,
+                        details TEXT NOT NULL,
+                        persianDate TEXT NOT NULL,
+                        timeText TEXT NOT NULL,
+                        dueAtMillis INTEGER NOT NULL,
+                        soundUri TEXT NOT NULL,
+                        completed INTEGER NOT NULL,
+                        createdAtMillis INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "civil-law-leitner.db",
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { INSTANCE = it }
         }
@@ -391,6 +501,7 @@ object StudyCardImporter {
     private val bundledAssets = listOf(
         "study_cards.json",
         "vocab_cards.json",
+        "arabic_vocab_cards.json",
         "trade_cards.json",
         "fiqh_cards.json",
     )
@@ -420,7 +531,7 @@ object StudyCardImporter {
                     require(id.isNotBlank() && seenIds.add(id)) {
                         "Duplicate/blank study-card id across bundled assets: $id"
                     }
-                    require(domain in setOf("TRADE", "FIQH", "VOCAB", "MOCK", "ERROR")) {
+                    require(domain in setOf("TRADE", "FIQH", "VOCAB", "ARABIC", "MOCK", "ERROR")) {
                         "Unsupported study-card domain $domain for $id"
                     }
                     require(ordinal > 0 && title.isNotBlank() && prompt.isNotBlank() && answer.isNotBlank()) {
