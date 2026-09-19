@@ -1,0 +1,79 @@
+name: Madani 3 Mind Game
+
+on:
+  push:
+    branches:
+      - product/civil-law-mind-game-v0.1
+    paths:
+      - 'civil-law-mind-game/**'
+      - '.github/workflows/madani3-mind-game.yml'
+  pull_request:
+    paths:
+      - 'civil-law-mind-game/**'
+      - '.github/workflows/madani3-mind-game.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install content tools
+        working-directory: civil-law-mind-game/tools
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chromium
+        working-directory: civil-law-mind-game/tools
+        run: npx playwright install --with-deps chromium
+
+      - name: Fetch official Articles 183-232 from Qavanin
+        run: node civil-law-mind-game/tools/fetch_madani3.mjs
+
+      - name: Build 50 tactile game levels
+        run: node civil-law-mind-game/tools/build_levels.mjs
+
+      - name: Audit game corpus
+        run: node civil-law-mind-game/tools/audit_levels.mjs
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android SDK 35
+        run: yes | sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Unit test and compile
+        run: gradle -p civil-law-mind-game/android testDebugUnitTest --stacktrace
+
+      - name: Build playable APK
+        run: gradle -p civil-law-mind-game/android assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: madani3-mind-game-apk
+          path: civil-law-mind-game/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload legal/game audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: madani3-mind-game-audit
+          path: |
+            civil-law-mind-game/generated/game_manifest.json
+            civil-law-mind-game/generated/madani3_official.json
+          if-no-files-found: error
