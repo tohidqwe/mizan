@@ -115,6 +115,7 @@ jobs:
           em = json.loads((assets / 'english_curriculum_manifest.json').read_text(encoding='utf-8'))
           vm = json.loads((assets / 'vocab_manifest.json').read_text(encoding='utf-8'))
           trade = json.loads((assets / 'trade_cards.json').read_text(encoding='utf-8'))
+          trade_all = json.loads((assets / 'trade_all_articles.json').read_text(encoding='utf-8'))
           tm = json.loads((assets / 'trade_source_manifest.json').read_text(encoding='utf-8'))
           fiqh = json.loads((assets / 'fiqh_cards.json').read_text(encoding='utf-8'))
           fm = json.loads((assets / 'fiqh_manifest.json').read_text(encoding='utf-8'))
@@ -148,6 +149,11 @@ jobs:
           assert tm['sourceOriginalCount'] + len(tm['omittedOriginalBySource']) == 600
           assert tm['sourceAmendmentCount'] + len(tm['omittedAmendmentBySource']) == 300
           assert len(trade) == tm['activeCardCount']
+          assert len(trade_all) == 900 and tm['fullLibraryCount'] == 900
+          assert sum(1 for x in trade_all if x['collection'] == 'T1311') == 600
+          assert sum(1 for x in trade_all if x['collection'] == 'L1347') == 300
+          assert len({x['id'] for x in trade_all}) == 900
+          assert all(x['officialText'].strip() and x['sourceUrl'].startswith('https://qavanin.ir/') for x in trade_all)
           assert len(trade) == tm['currentOriginalCount'] + tm['currentAmendmentCount']
           assert len(trade) >= 750
           assert all(x['id'].startswith(('TRADE:T1311:','TRADE:L1347:')) for x in trade)
@@ -183,6 +189,7 @@ jobs:
           print('ENGLISH_WORDS=2000')
           print('ARABIC_WORDS=1000')
           print('TRADE_CURRENT_UNITS=' + str(len(trade)))
+          print('TRADE_FULL_LIBRARY=900')
           print('FIQH_CARDS=120')
           PY
 
