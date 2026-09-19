@@ -134,7 +134,7 @@ object Phd140DayPlan {
         }
 
         val civil = spread(dayNumber, 1335, 89)
-        val trade = spread(dayNumber, 900, 89)
+        val trade = spread(dayNumber, 801, 89)
         val english = spread(dayNumber, 2000, 89)
         val arabic = spread(dayNumber, 1000, 89)
         val fiqh = spread(dayNumber, 120, 60)
