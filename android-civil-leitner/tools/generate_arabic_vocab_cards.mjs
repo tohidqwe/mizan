@@ -55,14 +55,25 @@ const curated=new Map([
 const normalize=s=>String(s??'').replace(/[ـًٌٍَُِّْ]/g,'').replace(/\s+/g,' ').trim();
 const faDigits=s=>String(s??'').trim();
 
-async function translateOne(word){
- const url=TRANSLATE+'?client=gtx&sl=ar&tl=fa&dt=t&q='+encodeURIComponent(word);
+async function translateRaw(text){
+ const url=TRANSLATE+'?client=gtx&sl=ar&tl=fa&dt=t&q='+encodeURIComponent(text);
  const r=await fetch(url,{headers:{'user-agent':'Mozilla/5.0 Doctor-Tohid-PhD-Course'}});
- if(!r.ok) throw new Error('translation HTTP '+r.status+' for '+word);
+ if(!r.ok) throw new Error('translation HTTP '+r.status);
  const j=await r.json();
- const text=(j?.[0]||[]).map(x=>x?.[0]||'').join('').trim();
- if(!text) throw new Error('blank translation for '+word);
- return text;
+ const out=(j?.[0]||[]).map(x=>x?.[0]||'').join('').trim();
+ if(!out) throw new Error('blank translation');
+ return out;
+}
+
+async function translateBatch(words){
+ const joined=words.join('\n');
+ const out=await translateRaw(joined);
+ const lines=out.split(/\r?\n/).map(x=>x.trim());
+ if(lines.length===words.length && lines.every(Boolean)) return lines;
+ // Translation providers occasionally collapse a line; retain correctness by falling back for only this batch.
+ const result=[];
+ for(const word of words) result.push(await translateRaw(word));
+ return result;
 }
 
 const response=await fetch(FREQ_URL,{headers:{'user-agent':'Doctor-Tohid-PhD-Course/1.0'}});
@@ -99,16 +110,18 @@ const push=(ar,fa,source)=>{
 for(const [ar,fa] of curated) push(ar,fa,'Curated fiqh/private-law Arabic vocabulary');
 
 let failures=0;
-for(const word of candidates){
- if(cards.length>=1000) break;
- if(used.has(word)) continue;
+const pending=candidates.filter(word=>!used.has(word));
+for(let offset=0; offset<pending.length && cards.length<1000; offset+=40){
+ const batch=pending.slice(offset,offset+40);
  try{
-  const translated=await translateOne(word);
-  push(word,translated,'FrequencyWords Arabic + machine Persian translation');
-  await new Promise(r=>setTimeout(r,18));
+  const translated=await translateBatch(batch);
+  for(let i=0;i<batch.length && cards.length<1000;i++){
+   push(batch[i],translated[i],'FrequencyWords Arabic + machine Persian translation');
+  }
+  await new Promise(r=>setTimeout(r,75));
  }catch(e){
-  failures++;
-  if(failures>80) throw new Error('Too many Arabic translation failures: '+String(e));
+  failures+=batch.length;
+  if(failures>160) throw new Error('Too many Arabic translation failures: '+String(e));
  }
 }
 
