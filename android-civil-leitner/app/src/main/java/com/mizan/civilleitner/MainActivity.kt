@@ -1,15 +1,22 @@
 package com.mizan.civilleitner
 
 import android.Manifest
+import android.app.AlarmManager
 import android.app.Application
+import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.net.Uri
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,11 +26,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +43,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
@@ -39,798 +51,860 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mizan.civilleitner.data.ArticleEntity
-import com.mizan.civilleitner.data.DailyProgressEntity
+import com.mizan.civilleitner.data.PlannerTaskEntity
+import com.mizan.civilleitner.data.ReminderEntity
 import com.mizan.civilleitner.data.StudyCardEntity
-import com.mizan.civilleitner.data.ProgressBackupManager
+import com.mizan.civilleitner.domain.PersianCalendar
 import com.mizan.civilleitner.domain.Phd140DayPlan
-import com.mizan.civilleitner.domain.ReviewResult
-import com.mizan.civilleitner.domain.StrictReviewScheduler
-import com.mizan.civilleitner.worker.ReminderScheduler
+import com.mizan.civilleitner.worker.StudyAlarmScheduler
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import kotlin.math.ceil
+
+private val FocusNavy = Color(0xFF17324D)
+private val FocusBlue = Color(0xFF2D6CDF)
+private val FocusGreen = Color(0xFF2E7D32)
+private val FocusAmber = Color(0xFFF4B400)
+private val FocusBackground = Color(0xFFF5F7F6)
+private val LawTextBlack = Color(0xFF171717)
+private val SoftRed = Color(0xFFB3261E)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { CivilLawRoot() }
+        setContent { DoctorTohidCourseRoot() }
     }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as CivilLawApplication
-    private val dao = app.database.articleDao()
+    private val articleDao = app.database.articleDao()
     private val cardDao = app.database.studyCardDao()
-    private val planDao = app.database.planDao()
-    private val clockEpochDay = MutableStateFlow(LocalDate.now().toEpochDay())
+    private val reminderDao = app.database.reminderDao()
+    private val plannerDao = app.database.plannerDao()
+    private val clock = MutableStateFlow(System.currentTimeMillis())
+    private val prefs = app.getSharedPreferences("doctor_tohid_settings", Context.MODE_PRIVATE)
+
+    val articles = articleDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val cards = cardDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val reminders = reminderDao.observeActive()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val dueReminders = clock.flatMapLatest { reminderDao.observeDue(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val plannerTasks = plannerDao.observeAll()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val soundUri = MutableStateFlow(prefs.getString("alarm_sound_uri", "") ?: "")
 
     init {
         viewModelScope.launch {
             while (isActive) {
-                val now = LocalDate.now().toEpochDay()
-                if (clockEpochDay.value != now) clockEpochDay.value = now
-                delay(60_000)
+                clock.value = System.currentTimeMillis()
+                delay(30_000)
             }
         }
     }
 
-    val articles = dao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val dueArticles = clockEpochDay.flatMapLatest { dao.observeDue(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val total = dao.observeTotalCount().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
-    val overdue = clockEpochDay.flatMapLatest { dao.observeOverdueCount(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    fun setSound(uri: String) {
+        soundUri.value = uri
+        prefs.edit().putString("alarm_sound_uri", uri).apply()
+    }
 
-    val studyCards = cardDao.observeAll().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val dueCards = clockEpochDay.flatMapLatest { cardDao.observeDue(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    fun scheduleReminder(
+        itemType: String,
+        itemId: String,
+        title: String,
+        body: String,
+        delayMillis: Long,
+    ) {
+        viewModelScope.launch {
+            val row = ReminderEntity(
+                itemType = itemType,
+                itemId = itemId,
+                title = title,
+                body = body,
+                dueAtMillis = System.currentTimeMillis() + delayMillis,
+                soundUri = soundUri.value,
+            )
+            val id = reminderDao.insert(row)
+            StudyAlarmScheduler.scheduleStudy(app, row.copy(id = id))
+            clock.value = System.currentTimeMillis()
+        }
+    }
 
-    val dueCount = combine(dueArticles, dueCards) { a, c -> a.size + c.size }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    fun markReminderDone(item: ReminderEntity) {
+        viewModelScope.launch {
+            reminderDao.update(item.copy(enabled = false))
+            StudyAlarmScheduler.cancel(app, StudyAlarmScheduler.KIND_STUDY, item.id)
+            clock.value = System.currentTimeMillis()
+        }
+    }
 
-    private val completedDays = planDao.observeCompletedDays()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    fun addPlannerTask(title: String, details: String, persianDate: String, timeText: String): String? {
+        val date = PersianCalendar.parseNumeric(persianDate) ?: return "تاریخ شمسی معتبر نیست."
+        val time = runCatching { LocalTime.parse(timeText.trim()) }.getOrNull()
+            ?: return "ساعت را به صورت HH:mm وارد کن."
+        val due = date.atTime(time).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        if (due <= System.currentTimeMillis()) return "زمان انتخاب‌شده گذشته است."
+        viewModelScope.launch {
+            val row = PlannerTaskEntity(
+                title = title.trim(),
+                details = details.trim(),
+                persianDate = persianDate.trim(),
+                timeText = timeText.trim(),
+                dueAtMillis = due,
+                soundUri = soundUri.value,
+            )
+            val id = plannerDao.insert(row)
+            StudyAlarmScheduler.schedulePlanner(app, row.copy(id = id))
+        }
+        return null
+    }
 
-    val effectiveDay = combine(completedDays, clockEpochDay) { completed, epochDay ->
-        val calendarDay = Phd140DayPlan.calendarDay(LocalDate.ofEpochDay(epochDay))
-        (1..calendarDay).firstOrNull { it !in completed } ?: calendarDay
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 1)
-
-    val currentPlan = effectiveDay.map(Phd140DayPlan::planFor)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Phd140DayPlan.planFor(1))
-
-    val dayProgress = effectiveDay.flatMapLatest { planDao.observeDay(it) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    val backupStatus = MutableStateFlow("")
-    val searchQuery = MutableStateFlow("")
-
-    private fun cardUnlocked(card: StudyCardEntity, plan: com.mizan.civilleitner.domain.DailyPlan, day: Int, reviewsDue: Int): Boolean {
-        if (card.firstStudiedEpochDay != null || card.reviewEnabled || card.explicitMastered) return true
-        if (reviewsDue > 0) return false
-        return when (card.domain) {
-            "TRADE" -> plan.tradeUnitFrom > 0 &&
-                (card.id.substringAfterLast(':').toIntOrNull() ?: -1) in plan.tradeUnitFrom..plan.tradeUnitTo
-            "VOCAB" -> plan.vocabFrom > 0 && card.ordinal in plan.vocabFrom..plan.vocabTo
-            "FIQH" -> {
-                val start = ((day - 1) * 8) % 120
-                val zeroBased = (card.ordinal - 1).coerceAtLeast(0)
-                (0 until 8).any { ((start + it) % 120) == zeroBased }
+    fun togglePlannerDone(task: PlannerTaskEntity) {
+        viewModelScope.launch {
+            val next = task.copy(completed = !task.completed)
+            plannerDao.update(next)
+            if (next.completed) {
+                StudyAlarmScheduler.cancel(app, StudyAlarmScheduler.KIND_PLANNER, task.id)
+            } else if (next.dueAtMillis > System.currentTimeMillis()) {
+                StudyAlarmScheduler.schedulePlanner(app, next)
             }
-            else -> false
         }
     }
 
-    val searchArticles = searchQuery.flatMapLatest { query ->
-        if (query.isBlank()) flowOf(emptyList()) else dao.search(query.trim())
-    }.combine(currentPlan) { rows, plan -> rows to plan }
-        .combine(dueCount) { (rows, plan), due ->
-            rows.filter { article ->
-                article.firstStudiedEpochDay != null || article.reviewEnabled || article.explicitMastered ||
-                    (due == 0 && plan.civilFrom > 0 && article.articleNumber in plan.civilFrom..plan.civilTo)
-            }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val searchCards = searchQuery.flatMapLatest { query ->
-        if (query.isBlank()) flowOf(emptyList()) else cardDao.search(query.trim())
-    }.combine(currentPlan) { rows, plan -> rows to plan }
-        .combine(effectiveDay) { (rows, plan), day -> Triple(rows, plan, day) }
-        .combine(dueCount) { (rows, plan, day), due ->
-            rows.filter { cardUnlocked(it, plan, day, due) }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    fun setSearchQuery(value: String) { searchQuery.value = value }
-
-    fun gradeFirstStudy(article: ArticleEntity, result: ReviewResult) {
+    fun deletePlanner(task: PlannerTaskEntity) {
         viewModelScope.launch {
-            val d = StrictReviewScheduler.firstStudy(result)
-            dao.update(article.copy(
-                reviewEnabled = true,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                explicitMastered = false,
-                lastReviewEpochDay = if (result == ReviewResult.DONT_KNOW) LocalDate.now().toEpochDay() else article.lastReviewEpochDay,
-                reviewCount = article.reviewCount + 1,
-                correctCount = article.correctCount + if (result == ReviewResult.KNEW) 1 else 0,
-                incorrectCount = article.incorrectCount + if (result == ReviewResult.DONT_KNOW) 1 else 0,
-                masteryLevel = "Review cycle",
-                firstStudiedEpochDay = article.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun gradeFirstStudy(card: StudyCardEntity, result: ReviewResult) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.firstStudy(result)
-            cardDao.update(card.copy(
-                reviewEnabled = true,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                explicitMastered = false,
-                lastReviewEpochDay = if (result == ReviewResult.DONT_KNOW) LocalDate.now().toEpochDay() else card.lastReviewEpochDay,
-                reviewCount = card.reviewCount + 1,
-                firstStudiedEpochDay = card.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun activateReview(article: ArticleEntity) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.activate()
-            dao.update(article.copy(
-                reviewEnabled = d.enabled,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                explicitMastered = false,
-                masteryLevel = "Review cycle",
-                firstStudiedEpochDay = article.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun gradeReview(article: ArticleEntity, result: ReviewResult) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.grade(article.strictReviewStage, result)
-            dao.update(article.copy(
-                reviewEnabled = true,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                lastReviewEpochDay = LocalDate.now().toEpochDay(),
-                reviewCount = article.reviewCount + 1,
-                correctCount = article.correctCount + if (result == ReviewResult.KNEW) 1 else 0,
-                incorrectCount = article.incorrectCount + if (result == ReviewResult.DONT_KNOW) 1 else 0,
-                masteryLevel = "Review cycle",
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun master(article: ArticleEntity) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.master()
-            dao.update(article.copy(
-                reviewEnabled = false,
-                explicitMastered = true,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                masteryLevel = "Mastered",
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun reactivate(article: ArticleEntity) = activateReview(article)
-
-    fun activateReview(card: StudyCardEntity) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.activate()
-            cardDao.update(card.copy(
-                reviewEnabled = true,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                explicitMastered = false,
-                firstStudiedEpochDay = card.firstStudiedEpochDay ?: LocalDate.now().toEpochDay(),
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun gradeReview(card: StudyCardEntity, result: ReviewResult) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.grade(card.strictReviewStage, result)
-            cardDao.update(card.copy(
-                reviewEnabled = true,
-                strictReviewStage = d.stage,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-                lastReviewEpochDay = LocalDate.now().toEpochDay(),
-                reviewCount = card.reviewCount + 1,
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun master(card: StudyCardEntity) {
-        viewModelScope.launch {
-            val d = StrictReviewScheduler.master()
-            cardDao.update(card.copy(
-                reviewEnabled = false,
-                explicitMastered = true,
-                nextReviewEpochDay = d.nextReviewEpochDay,
-            ))
-            ReminderScheduler.refreshNow(app)
-        }
-    }
-
-    fun toggleFavorite(article: ArticleEntity) {
-        viewModelScope.launch { dao.update(article.copy(favorite = !article.favorite)) }
-    }
-    fun exportBackup(uri: Uri) {
-        viewModelScope.launch {
-            backupStatus.value = "در حال ساخت نسخه پشتیبان…"
-            runCatching { ProgressBackupManager.exportTo(app, app.database, uri) }
-                .onSuccess { result ->
-                    backupStatus.value = "پشتیبان ذخیره شد: " + result.articles + " ماده، " + result.cards + " کارت، " + result.days + " روز."
-                }
-                .onFailure { error ->
-                    backupStatus.value = "خطا در پشتیبان‌گیری: " + (error.message ?: "نامشخص")
-                }
-        }
-    }
-
-    fun importBackup(uri: Uri) {
-        viewModelScope.launch {
-            backupStatus.value = "در حال بازیابی پیشرفت…"
-            runCatching { ProgressBackupManager.importFrom(app, app.database, uri) }
-                .onSuccess { result ->
-                    ReminderScheduler.refreshNow(app)
-                    backupStatus.value = "پیشرفت بازیابی شد: " + result.articles + " ماده، " + result.cards + " کارت، " + result.days + " روز."
-                }
-                .onFailure { error ->
-                    backupStatus.value = "خطا در بازیابی: " + (error.message ?: "فایل نامعتبر")
-                }
-        }
-    }
-
-    fun toggleTask(index: Int, taskCount: Int) {
-        if (index == 0) return // Review task is completed only by actually clearing the due queue.
-        if (dueCount.value > 0) return // Hard gate: no new-study completion while reviews are due.
-        viewModelScope.launch {
-            val day = effectiveDay.value
-            val old = dayProgress.value ?: DailyProgressEntity(day, 0, false, LocalDate.now().toEpochDay())
-            val bit = 1 shl index
-            val newMask = if (old.completedMask and bit != 0) old.completedMask and bit.inv() else old.completedMask or bit
-            var requiredMask = 0
-            for (i in 1 until taskCount) requiredMask = requiredMask or (1 shl i)
-            val complete = (newMask and requiredMask) == requiredMask && dueCount.value == 0
-            planDao.upsert(old.copy(
-                completedMask = newMask,
-                dayCompleted = complete,
-                updatedEpochDay = LocalDate.now().toEpochDay(),
-            ))
-            ReminderScheduler.refreshNow(app)
+            StudyAlarmScheduler.cancel(app, StudyAlarmScheduler.KIND_PLANNER, task.id)
+            plannerDao.delete(task.id)
         }
     }
 }
 
-private enum class Tab(val label: String, val glyph: String) {
+private enum class AppTab(val title: String, val glyph: String) {
     TODAY("امروز", "⌂"),
-    MATERIALS("منابع", "§"),
-    REVIEW("مرور", "✓"),
-    PROGRESS("پیشرفت", "◔"),
-    SEARCH("جستجو", "⌕"),
+    LAWS("قوانین", "§"),
+    FIQH("متون فقه", "ع"),
+    VOCAB("لغات", "Aa"),
+    PLANNER("برنامه", "◷"),
 }
 
 @Composable
-private fun CivilLawRoot(vm: MainViewModel = viewModel()) {
+private fun DoctorTohidCourseRoot(vm: MainViewModel = viewModel()) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            scope.launch { ReminderScheduler.refreshNow(context) }
-            ReminderScheduler.scheduleAll(context)
-        }
-    }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     LaunchedEffect(Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            ReminderScheduler.refreshNow(context)
-            ReminderScheduler.scheduleAll(context)
         }
+        scope.launch { StudyAlarmScheduler.rescheduleAll(context.applicationContext) }
     }
 
     val colors = lightColorScheme(
-        primary = Color(0xFF102A43),
+        primary = FocusNavy,
         onPrimary = Color.White,
-        secondary = Color(0xFF486581),
-        background = Color(0xFFF7F9FC),
+        secondary = FocusBlue,
+        tertiary = FocusGreen,
+        background = FocusBackground,
         surface = Color.White,
+        error = SoftRed,
     )
 
     MaterialTheme(colorScheme = colors) {
         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-            var selected by remember { mutableStateOf(Tab.TODAY) }
-            Scaffold(bottomBar = {
-                NavigationBar {
-                    Tab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = selected == tab,
-                            onClick = { selected = tab },
-                            icon = { Text(tab.glyph, fontSize = 20.sp) },
-                            label = { Text(tab.label) },
-                        )
-                    }
-                }
-            }) { padding ->
-                Box(Modifier.padding(padding).fillMaxSize()) {
-                    when (selected) {
-                        Tab.TODAY -> TodayScreen(vm) { selected = Tab.REVIEW }
-                        Tab.MATERIALS -> MaterialsScreen(vm)
-                        Tab.REVIEW -> ReviewScreen(vm)
-                        Tab.PROGRESS -> ProgressScreen(vm)
-                        Tab.SEARCH -> SearchScreen(vm)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun TodayScreen(vm: MainViewModel, startReview: () -> Unit) {
-    val plan by vm.currentPlan.collectAsStateWithLifecycle()
-    val effectiveDay by vm.effectiveDay.collectAsStateWithLifecycle()
-    val progress by vm.dayProgress.collectAsStateWithLifecycle()
-    val dueCount by vm.dueCount.collectAsStateWithLifecycle()
-    val overdue by vm.overdue.collectAsStateWithLifecycle()
-    val total by vm.total.collectAsStateWithLifecycle()
-    val calendarDay = Phd140DayPlan.calendarDay()
-    val behind = (calendarDay - effectiveDay).coerceAtLeast(0)
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Text("دکتری حقوق خصوصی ۱۴۰۶", style = MaterialTheme.typography.headlineMedium)
-            Text("روز $effectiveDay از ۱۴۰ • ${plan.persianLabel}", color = MaterialTheme.colorScheme.secondary)
-            if (behind > 0) Text("$behind روز عقب‌افتادگی؛ تا جبران، برنامه جلو نمی‌رود.", color = MaterialTheme.colorScheme.error)
-        }
-        item { MetricCard("مرحله", plan.phase, "حداقل ${plan.mandatoryMinutes} دقیقه کار واقعی") }
-        item { MetricCard("مرور اجباری", dueCount.toString(), if (overdue > 0) "$overdue مورد مدنی عقب‌افتاده" else "صف امروز") }
-        item {
-            val inactive = (1335 - total).coerceAtLeast(0)
-            MetricCard(
-                "بانک قانون مدنی",
-                "$total ماده جاری",
-                "۱۳۳۵ شماره قانونی در منبع رسمی؛ $inactive ماده منسوخ/حذف‌شده طبق Qavanin.ir از مطالعه فعال کنار گذاشته شده است",
-            )
-        }
-        item {
-            Button(
-                onClick = startReview,
-                enabled = dueCount > 0,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-            ) { Text(if (dueCount == 0) "صف مرور صفر است" else "اول مرور را تمام کن ($dueCount)") }
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("ماموریت‌های امروز", style = MaterialTheme.typography.titleLarge)
-                    plan.tasks.forEachIndexed { index, task ->
-                        val checked = if (index == 0) dueCount == 0 else (progress?.completedMask ?: 0) and (1 shl index) != 0
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Checkbox(
-                                checked = checked,
-                                onCheckedChange = { vm.toggleTask(index, plan.tasks.size) },
-                                enabled = index > 0 && dueCount == 0,
+            var selected by remember { mutableStateOf(AppTab.TODAY) }
+            Scaffold(
+                topBar = { HeaderBar() },
+                bottomBar = {
+                    NavigationBar(containerColor = Color.White) {
+                        AppTab.entries.forEach { tab ->
+                            NavigationBarItem(
+                                selected = selected == tab,
+                                onClick = { selected = tab },
+                                icon = { Text(tab.glyph, fontSize = if (tab == AppTab.VOCAB) 14.sp else 20.sp) },
+                                label = { Text(tab.title, fontSize = 11.sp) },
                             )
-                            Text(task, modifier = Modifier.weight(1f))
                         }
                     }
-                    if (dueCount > 0) {
-                        Text("قفل فعال است: تا مرورها صفر نشوند، تیک مأموریت‌های جدید باز نمی‌شود.", color = MaterialTheme.colorScheme.error)
-                    } else if (progress?.dayCompleted == true) {
-                        Text("روز $effectiveDay کامل شد. اگر امروز روز تقویمی فعلی است، ادامه اصلی فرداست.", color = MaterialTheme.colorScheme.primary)
+                }
+            ) { padding ->
+                Box(Modifier.padding(padding).fillMaxSize()) {
+                    when (selected) {
+                        AppTab.TODAY -> TodayDashboard(vm)
+                        AppTab.LAWS -> LawsScreen(vm)
+                        AppTab.FIQH -> FiqhScreen(vm)
+                        AppTab.VOCAB -> VocabularyScreen(vm)
+                        AppTab.PLANNER -> PlannerScreen(vm)
                     }
                 }
             }
         }
-        item { MotivationCard("درس", plan.motivation.study) }
-        item { MotivationCard("سلامتی", plan.motivation.health) }
-        item { MotivationCard("ترک سیگار", plan.motivation.smoking) }
-        item { MotivationCard("خانواده", plan.motivation.family) }
-        item { MotivationCard("خودسازی و پیشرفت", plan.motivation.growth) }
+    }
+}
+
+@Composable
+private fun HeaderBar() {
+    val today = LocalDate.now()
+    val persian = PersianCalendar.fromGregorian(today)
+    val left = ChronoUnit.DAYS.between(today, Phd140DayPlan.EXAM).coerceAtLeast(0)
+    Surface(shadowElevation = 3.dp, color = Color.White) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Text(
+                "دوره آموزشی دکتر توحید نجفیان",
+                style = MaterialTheme.typography.titleLarge,
+                color = FocusNavy,
+                fontWeight = FontWeight.Bold,
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("امروز: ${persian.label()}", color = Color(0xFF536471), fontSize = 13.sp)
+                Text("$left روز تا تاریخ هدف آزمون", color = FocusBlue, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+            }
+        }
+    }
+}
+
+data class RangeSlice(val from: Int, val to: Int) {
+    val count: Int get() = if (from <= 0 || to < from) 0 else to - from + 1
+}
+
+private fun rangeFor(day: Int, total: Int, coverDays: Int): RangeSlice {
+    if (day !in 1..coverDays || total <= 0) return RangeSlice(0,0)
+    val from = ((day - 1) * total) / coverDays + 1
+    val to = (day * total) / coverDays
+    return RangeSlice(from,to)
+}
+
+@Composable
+private fun TodayDashboard(vm: MainViewModel) {
+    val articles by vm.articles.collectAsStateWithLifecycle()
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    val due by vm.dueReminders.collectAsStateWithLifecycle()
+
+    val today = LocalDate.now()
+    val day = Phd140DayPlan.calendarDay(today)
+    val trade = cards.filter { it.domain == "TRADE" }.sortedBy { it.ordinal }
+    val english = cards.filter { it.domain == "VOCAB" }.sortedBy { it.ordinal }
+    val arabic = cards.filter { it.domain == "ARABIC" }.sortedBy { it.ordinal }
+    val fiqh = cards.filter { it.domain == "FIQH" }.sortedBy { it.ordinal }
+
+    val civilRange = rangeFor(day,1335,89)
+    val tradeRange = rangeFor(day,trade.size,89)
+    val englishRange = rangeFor(day,english.size,89)
+    val arabicRange = rangeFor(day,arabic.size,89)
+    val fiqhRange = rangeFor(day,fiqh.size,60)
+
+    val newMinutes = if (day <= 89) {
+        civilRange.count * 3.0 + tradeRange.count * 3.0 +
+            englishRange.count * .75 + arabicRange.count * .75 + fiqhRange.count * 6.0
+    } else if (day <= 112) 180.0 else if (day <= 126) 210.0 else 150.0
+
+    val reviewMinutes = due.sumOf {
+        when (it.itemType) {
+            "CIVIL", "TRADE" -> 3.0
+            "FIQH" -> 5.0
+            "ENGLISH", "ARABIC" -> .75
+            else -> 2.0
+        }
+    }
+    val totalMinutes = ceil(newMinutes + reviewMinutes).toInt()
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            val progress = (day.coerceIn(1,140) / 140f)
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFEAF1FA))) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("روز $day از ۱۴۰", style = MaterialTheme.typography.headlineSmall, color = FocusNavy)
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
+                    Text("زمان مطالعه جدید: حدود ${ceil(newMinutes).toInt()} دقیقه")
+                    Text(
+                        "زمان مرورهای انتخابی: حدود ${ceil(reviewMinutes).toInt()} دقیقه",
+                        color = if (due.isEmpty()) FocusGreen else FocusAmber,
+                    )
+                    Text("کل زمان پیشنهادی امروز: حدود $totalMinutes دقیقه", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        item {
+            Text("برنامه امروز", style = MaterialTheme.typography.titleLarge, color = FocusNavy)
+        }
+
+        if (day <= 89) {
+            item { PlanLine("قانون مدنی", "مواد ${civilRange.from} تا ${civilRange.to}", civilRange.count) }
+            item { PlanLine("قانون تجارت", "واحدهای ${tradeRange.from} تا ${tradeRange.to}", tradeRange.count) }
+            item { PlanLine("لغات انگلیسی", "کارت‌های ${englishRange.from} تا ${englishRange.to}", englishRange.count) }
+            item { PlanLine("لغات عربی", "کارت‌های ${arabicRange.from} تا ${arabicRange.to}", arabicRange.count) }
+            item { PlanLine("متون فقه", "کارت‌های ${fiqhRange.from} تا ${fiqhRange.to}", fiqhRange.count) }
+        } else {
+            item {
+                Card {
+                    Text(
+                        when {
+                            day <= 112 -> "فاز دوم: مرور موضوعی قوانین، لغات دشوار و متون فقه + تست زمان‌دار."
+                            day <= 126 -> "فاز سوم: شبیه‌سازی آزمون، ترمیم نقاط ضعف و مرور فشرده."
+                            else -> "فاز نهایی: فقط تثبیت، مرورهای سررسیدشده و جمع‌بندی."
+                        },
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+        }
+
+        item {
+            Text("مرورهای سررسیدشده", style = MaterialTheme.typography.titleLarge, color = FocusNavy)
+            if (due.isEmpty()) Text("فعلاً مرور سررسیدشده‌ای نداری.", color = FocusGreen)
+        }
+        items(due, key = { it.id }) { reminder ->
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7DF))) {
+                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(reminder.title, fontWeight = FontWeight.Bold)
+                        Text(reminder.body, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 13.sp)
+                    }
+                    Button(onClick = { vm.markReminderDone(reminder) }) { Text("مرور شد") }
+                }
+            }
+        }
         item {
             Text(
-                "روز آزمون: ۱۶ بهمن ۱۴۰۵. برنامه ۱۴۰ روزه در ۱۵ بهمن پایان می‌یابد.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.secondary,
+                "تاریخ هدف داخلی برنامه: ${PersianCalendar.fromGregorian(Phd140DayPlan.EXAM).label()}",
+                color = Color(0xFF6E7D86),
+                fontSize = 12.sp,
             )
         }
     }
 }
 
 @Composable
-private fun MotivationCard(title: String, body: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-            Text(body)
-        }
-    }
-}
-
-@Composable
-private fun MetricCard(title: String, value: String, subtitle: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, color = MaterialTheme.colorScheme.secondary)
-            Text(value, style = MaterialTheme.typography.headlineSmall)
-            Text(subtitle, style = MaterialTheme.typography.bodySmall)
-        }
-    }
-}
-
-@Composable
-private fun MaterialsScreen(vm: MainViewModel) {
-    val articles by vm.articles.collectAsStateWithLifecycle()
-    val cards by vm.studyCards.collectAsStateWithLifecycle()
-    val plan by vm.currentPlan.collectAsStateWithLifecycle()
-    val effectiveDay by vm.effectiveDay.collectAsStateWithLifecycle()
-    val dueCount by vm.dueCount.collectAsStateWithLifecycle()
-    var domain by remember { mutableStateOf("CIVIL") }
-    val domains = listOf("CIVIL" to "مدنی", "TRADE" to "تجارت", "FIQH" to "متون فقه", "VOCAB" to "زبان")
-
-    val todayArticles = if (dueCount > 0 || plan.civilFrom <= 0) {
-        emptyList()
-    } else {
-        articles.filter { it.articleNumber in plan.civilFrom..plan.civilTo }
-    }
-    val todayCards = if (dueCount > 0) {
-        emptyList()
-    } else {
-        when (domain) {
-            "TRADE" -> if (plan.tradeUnitFrom > 0) cards.filter { card ->
-                card.domain == "TRADE" &&
-                    (card.id.substringAfterLast(':').toIntOrNull() ?: -1) in plan.tradeUnitFrom..plan.tradeUnitTo
-            } else emptyList()
-            "VOCAB" -> if (plan.vocabFrom > 0) cards.filter {
-                it.domain == "VOCAB" && it.ordinal in plan.vocabFrom..plan.vocabTo
-            } else emptyList()
-            "FIQH" -> {
-                val fiqh = cards.filter { it.domain == "FIQH" }.sortedBy { it.ordinal }
-                if (fiqh.isEmpty()) emptyList() else {
-                    val start = ((effectiveDay - 1) * 8) % fiqh.size
-                    (0 until minOf(8, fiqh.size)).map { fiqh[(start + it) % fiqh.size] }
-                }
+private fun PlanLine(title: String, range: String, count: Int) {
+    Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column {
+                Text(title, fontWeight = FontWeight.SemiBold, color = FocusNavy)
+                Text(range, color = Color(0xFF667782), fontSize = 13.sp)
             }
-            else -> emptyList()
+            Text("$count مورد", color = FocusBlue, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+@Composable
+private fun LawsScreen(vm: MainViewModel) {
+    val articles by vm.articles.collectAsStateWithLifecycle()
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    var law by remember { mutableStateOf("CIVIL") }
+    var query by remember { mutableStateOf("") }
+    val trade = remember(cards) { cards.filter { it.domain == "TRADE" }.sortedBy { it.ordinal } }
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            domains.forEach { (key, label) ->
-                if (domain == key) Button(onClick = { domain = key }, modifier = Modifier.weight(1f)) { Text(label) }
-                else OutlinedButton(onClick = { domain = key }, modifier = Modifier.weight(1f)) { Text(label) }
-            }
+        Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (law == "CIVIL") Button({ law="CIVIL" }, Modifier.weight(1f)) { Text("قانون مدنی") }
+            else OutlinedButton({ law="CIVIL" }, Modifier.weight(1f)) { Text("قانون مدنی") }
+            if (law == "TRADE") Button({ law="TRADE" }, Modifier.weight(1f)) { Text("قانون تجارت") }
+            else OutlinedButton({ law="TRADE" }, Modifier.weight(1f)) { Text("قانون تجارت") }
         }
-        if (domain == "CIVIL") {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            label = { Text("جستجو در شماره یا متن ماده") },
+            singleLine = true,
+        )
+        Spacer(Modifier.height(8.dp))
+        if (law == "CIVIL") {
+            val shown = articles.filter {
+                query.isBlank() || it.articleNumber.toString().contains(query.trim()) ||
+                    it.officialText.contains(query.trim(), ignoreCase = true)
+            }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                item {
-                    Text("قانون مدنی — فقط سهم روز $effectiveDay", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp))
-                    Text(
-                        if (dueCount > 0) "قفل فعال است؛ اول مرورهای سررسیدشده را صفر کن."
-                        else if (plan.civilFrom > 0) "مواد جاری ${plan.civilFrom} تا ${plan.civilTo}؛ آینده تا تکمیل برنامه روز باز نمی‌شود."
-                        else "در این فاز مبحث جدید مدنی باز نمی‌شود؛ فقط مرور و تست.",
-                        modifier = Modifier.padding(horizontal = 8.dp),
-                        color = if (dueCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
-                    )
-                }
-                items(todayArticles, key = { it.articleNumber }) { article ->
-                    CivilMaterialCard(article, vm)
+                items(shown, key = { it.articleNumber }) {
+                    CivilLawCard(it,vm)
                 }
             }
         } else {
+            val shown = trade.filter {
+                query.isBlank() || it.title.contains(query.trim(),true) ||
+                    it.answer.contains(query.trim(),true) || it.id.contains(query.trim(),true)
+            }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                item {
-                    Text(domains.first { it.first == domain }.second + " — فقط سهم روز $effectiveDay", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(8.dp))
-                    if (dueCount > 0) Text("قفل فعال است؛ اول مرورهای سررسیدشده را صفر کن.", color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 8.dp))
+                items(shown, key = { it.id }) {
+                    TradeLawCard(it,vm)
                 }
-                if (todayCards.isEmpty() && dueCount == 0) item {
-                    Text("برای این درس در روز $effectiveDay محتوای جدیدی باز نیست؛ فقط مرور/تست برنامه‌شده انجام می‌شود.", Modifier.padding(20.dp))
-                }
-                items(todayCards, key = { it.id }) { card -> StudyMaterialCard(card, vm) }
             }
         }
     }
 }
 
-@Composable
-private fun CivilMaterialCard(article: ArticleEntity, vm: MainViewModel) {
-    var revealed by remember(article.articleNumber) { mutableStateOf(article.firstStudiedEpochDay != null) }
-    val firstExposure = article.firstStudiedEpochDay == null && !article.reviewEnabled && !article.explicitMastered
+private val legalImportantWords = listOf(
+    "باطل","بطلان","غیرنافذ","عدم نفوذ","فسخ","اقاله","خیار","اکراه","اشتباه","اهلیت",
+    "تعهد","ضامن","ضمان","مسئول","مالک","مالکیت","تصرف","ارث","وارث","ترکه","وصیت",
+    "نکاح","طلاق","عده","حضانت","نفقه","مهر","بیع","اجاره","رهن","وکالت","حواله",
+    "کفالت","صلح","شرکت","مضاربه","مزارعه","مساقات","تسلیم","ثمن","مبیع","خسارت",
+    "تقصیر","اتلاف","تسبیب","غصب","شفعه","قیم","محجور","صغیر","مجنون","سفیه",
+    "ممنوع","مکلف","باید","نمی‌تواند","حق دارد","استثنا","مگر","شرط","مهلت"
+)
 
+private fun highlightedLawText(text: String): AnnotatedString = buildAnnotatedString {
+    append(text)
+    legalImportantWords.forEach { word ->
+        var start = text.indexOf(word)
+        while (start >= 0) {
+            addStyle(
+                SpanStyle(color = FocusGreen, fontWeight = FontWeight.Bold),
+                start,
+                start + word.length
+            )
+            start = text.indexOf(word,start + word.length)
+        }
+    }
+}
+
+@Composable
+private fun CivilLawCard(article: ArticleEntity, vm: MainViewModel) {
+    val context=LocalContext.current
+    var reminder by remember { mutableStateOf(false) }
+    var ai by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("ماده ${article.articleNumber}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { vm.toggleFavorite(article) }) { Text(if (article.favorite) "★" else "☆") }
-            }
-
-            if (!revealed) {
-                Text(article.recallQuestion.ifBlank { "حکم ماده ${article.articleNumber} را قبل از دیدن متن بازگو کن." })
-                Button(onClick = { revealed = true }, modifier = Modifier.fillMaxWidth()) { Text("نمایش متن ماده") }
-            } else {
-                Text("متن رسمی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                Text(article.officialText)
-
-                if (article.simpleExplanation.isNotBlank()) {
-                    Text("توضیح ساده اختصاصی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                    Text(article.simpleExplanation)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row {
+                    Text("ماده ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(article.articleNumber.toString(), color = FocusBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
-                if (article.analyticalPoint.isNotBlank()) {
-                    Text("نکته تحلیلی", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                    Text(article.analyticalPoint)
-                }
-
-                if (firstExposure) {
-                    Text("این ماده چقدر در ذهنت ماند؟", style = MaterialTheme.typography.titleSmall)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { vm.gradeFirstStudy(article, ReviewResult.DONT_KNOW) }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
-                        OutlinedButton(onClick = { vm.gradeFirstStudy(article, ReviewResult.HARD) }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
-                        Button(onClick = { vm.gradeFirstStudy(article, ReviewResult.KNEW) }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
-                    }
-                } else if (article.explicitMastered) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { vm.reactivate(article) }) { Text("بازگشت به مرور") }
-                        Text("مسلط ✓", modifier = Modifier.padding(top = 12.dp))
-                    }
-                } else if (article.reviewEnabled) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("در چرخه مرور • مرحله ${article.strictReviewStage + 1}", modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = { vm.master(article) }) { Text("مسلط شدم") }
-                    }
-                } else {
-                    Button(onClick = { vm.activateReview(article) }, modifier = Modifier.fillMaxWidth()) { Text("ورود به چرخه مرور") }
+                Row {
+                    TextButton(onClick = { reminder=true }) { Text("⏰ یادآوری") }
+                    TextButton(onClick = { ai=true }) { Text("↗ هوش مصنوعی") }
                 }
             }
-            Text("منبع رسمی: Qavanin.ir", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            Text(highlightedLawText(article.officialText), color = LawTextBlack, lineHeight = 26.sp)
+            if (article.topic == "ماده منسوخ") {
+                Text("وضعیت منبع: منسوخ/حذف‌شده", color = SoftRed, fontSize = 12.sp)
+            }
         }
     }
+    if(reminder) ReminderDialog(
+        title="ماده ${article.articleNumber} قانون مدنی",
+        onDismiss={reminder=false},
+        onSelect={ delay ->
+            vm.scheduleReminder("CIVIL",article.articleNumber.toString(),"مرور ماده ${article.articleNumber} قانون مدنی",article.officialText,delay)
+            reminder=false
+        }
+    )
+    if(ai) AiDialog(
+        onDismiss={ai=false},
+        onGemini={ shareLawToAi(context,"com.google.android.apps.bard","ماده ${article.articleNumber} قانون مدنی",article.officialText); ai=false },
+        onDeepSeek={ shareLawToAi(context,"com.deepseek.chat","ماده ${article.articleNumber} قانون مدنی",article.officialText); ai=false },
+    )
 }
 
 @Composable
-private fun StudyMaterialCard(card: StudyCardEntity, vm: MainViewModel) {
-    var revealed by remember(card.id) { mutableStateOf(card.firstStudiedEpochDay != null) }
-    val firstExposure = card.firstStudiedEpochDay == null && !card.reviewEnabled && !card.explicitMastered
-
+private fun TradeLawCard(card: StudyCardEntity, vm: MainViewModel) {
+    val context=LocalContext.current
+    var reminder by remember { mutableStateOf(false) }
+    var ai by remember { mutableStateOf(false) }
+    val parts=card.id.split(':')
+    val source=if(card.id.startsWith("TRADE:L1347:")) "لایحه اصلاحی ۱۳۴۷" else "قانون تجارت ۱۳۱۱"
+    val number=parts.lastOrNull() ?: card.ordinal.toString()
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-            Text(card.title, style = MaterialTheme.typography.titleMedium)
-
-            if (!revealed) {
-                Text(card.prompt)
-                Button(onClick = { revealed = true }, modifier = Modifier.fillMaxWidth()) { Text("نمایش پاسخ") }
-            } else {
-                if (card.domain == "TRADE") {
-                    Text("متن ماده", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                    Text(card.answer)
-                    if (card.explanation.isNotBlank()) {
-                        Text("نکته مرور", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                        Text(card.explanation)
-                    }
-                    Text("سؤال یادآوری", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                    Text(card.prompt)
-                } else {
-                    Text("پاسخ", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.secondary)
-                    Text(card.answer)
-                    if (card.explanation.isNotBlank()) Text(card.explanation, color = MaterialTheme.colorScheme.secondary)
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row {
+                    Text("ماده ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(number, color = FocusBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
+                Row {
+                    TextButton({reminder=true}) { Text("⏰ یادآوری") }
+                    TextButton({ai=true}) { Text("↗ هوش مصنوعی") }
+                }
+            }
+            Text(source, color = Color(0xFF687984), fontSize = 12.sp)
+            Text(highlightedLawText(card.answer), color = LawTextBlack, lineHeight = 26.sp)
+        }
+    }
+    if(reminder) ReminderDialog(
+        title="ماده $number — $source",
+        onDismiss={reminder=false},
+        onSelect={ delay ->
+            vm.scheduleReminder("TRADE",card.id,"مرور ماده $number — $source",card.answer,delay)
+            reminder=false
+        }
+    )
+    if(ai) AiDialog(
+        onDismiss={ai=false},
+        onGemini={ shareLawToAi(context,"com.google.android.apps.bard","ماده $number — $source",card.answer); ai=false },
+        onDeepSeek={ shareLawToAi(context,"com.deepseek.chat","ماده $number — $source",card.answer); ai=false },
+    )
+}
 
-                if (firstExposure) {
-                    Text("پاسخت چطور بود؟", style = MaterialTheme.typography.titleSmall)
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedButton(onClick = { vm.gradeFirstStudy(card, ReviewResult.DONT_KNOW) }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
-                        OutlinedButton(onClick = { vm.gradeFirstStudy(card, ReviewResult.HARD) }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
-                        Button(onClick = { vm.gradeFirstStudy(card, ReviewResult.KNEW) }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
-                    }
-                } else {
-                    when {
-                        card.explicitMastered -> Button(onClick = { vm.activateReview(card) }) { Text("بازگشت به مرور") }
-                        card.reviewEnabled -> OutlinedButton(onClick = { vm.master(card) }) { Text("مسلط شدم") }
-                        else -> Button(onClick = { vm.activateReview(card) }) { Text("ورود به چرخه مرور") }
+private fun shareLawToAi(context: Context, packageName: String, title: String, text: String) {
+    val prompt = """
+این ماده قانونی را با حفظ دقت حقوقی، به زبان ساده تفهیم و ساده‌سازی کن.
+ابتدا مفهوم اصلی ماده را توضیح بده، سپس اجزای آن را تفکیک کن و در پایان یک مثال کوتاه بزن.
+چیزی خارج از متن ماده را به قانون نسبت نده.
+
+$title:
+$text
+""".trimIndent()
+    val targeted = Intent(Intent.ACTION_SEND).apply {
+        type="text/plain"
+        putExtra(Intent.EXTRA_TEXT,prompt)
+        setPackage(packageName)
+    }
+    val pm=context.packageManager
+    if(targeted.resolveActivity(pm)!=null) context.startActivity(targeted)
+    else {
+        val generic=Intent(Intent.ACTION_SEND).apply {
+            type="text/plain"
+            putExtra(Intent.EXTRA_TEXT,prompt)
+        }
+        context.startActivity(Intent.createChooser(generic,"ارسال ماده به هوش مصنوعی"))
+    }
+}
+
+@Composable
+private fun AiDialog(onDismiss:()->Unit,onGemini:()->Unit,onDeepSeek:()->Unit) {
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        title={Text("ارسال ماده برای تفهیم")},
+        text={Text("پرامپت ساده‌سازی از قبل آماده است. هوش مصنوعی مقصد را انتخاب کن.")},
+        confirmButton={ Button(onClick=onGemini){Text("Gemini")} },
+        dismissButton={
+            Row {
+                TextButton(onClick=onDeepSeek){Text("DeepSeek")}
+                TextButton(onClick=onDismiss){Text("انصراف")}
+            }
+        }
+    )
+}
+
+private data class IntervalOption(val label:String,val millis:Long)
+private val reminderIntervals=listOf(
+    IntervalOption("۱۲ ساعت",12L*60*60*1000),
+    IntervalOption("۲۴ ساعت",24L*60*60*1000),
+    IntervalOption("۴۸ ساعت",48L*60*60*1000),
+    IntervalOption("۳ روز",3L*24*60*60*1000),
+    IntervalOption("۷ روز",7L*24*60*60*1000),
+    IntervalOption("۱۴ روز",14L*24*60*60*1000),
+    IntervalOption("۲۰ روز",20L*24*60*60*1000),
+    IntervalOption("۴۰ روز",40L*24*60*60*1000),
+)
+
+@Composable
+private fun ReminderDialog(title:String,onDismiss:()->Unit,onSelect:(Long)->Unit) {
+    AlertDialog(
+        onDismissRequest=onDismiss,
+        title={Text("یادآوری مجدد")},
+        text={
+            Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
+                Text(title,color=FocusNavy,fontWeight=FontWeight.Bold)
+                reminderIntervals.chunked(2).forEach { row ->
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(6.dp)) {
+                        row.forEach { opt ->
+                            OutlinedButton(
+                                onClick={onSelect(opt.millis)},
+                                modifier=Modifier.weight(1f)
+                            ){Text(opt.label)}
+                        }
                     }
                 }
             }
-            if (card.sourceName.isNotBlank()) Text(card.sourceName, style = MaterialTheme.typography.bodySmall)
+        },
+        confirmButton={},
+        dismissButton={TextButton(onClick=onDismiss){Text("بستن")}}
+    )
+}
+
+@Composable
+private fun FiqhScreen(vm: MainViewModel) {
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    val fiqh=cards.filter{it.domain=="FIQH"}.sortedBy{it.ordinal}
+    var query by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        Text(
+            "متون فقه — معاملات",
+            style=MaterialTheme.typography.headlineSmall,
+            color=FocusNavy,
+            modifier=Modifier.padding(14.dp)
+        )
+        OutlinedTextField(
+            value=query,onValueChange={query=it},
+            modifier=Modifier.fillMaxWidth().padding(horizontal=12.dp),
+            label={Text("جستجو در مبحث یا متن")}
+        )
+        val shown=fiqh.filter{query.isBlank()||it.title.contains(query,true)||it.prompt.contains(query,true)||it.answer.contains(query,true)}
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal=12.dp)) {
+            items(shown,key={it.id}) { card -> FiqhCard(card,vm) }
         }
     }
 }
 
 @Composable
-private fun ReviewScreen(vm: MainViewModel) {
-    val dueArticles by vm.dueArticles.collectAsStateWithLifecycle()
-    val dueCards by vm.dueCards.collectAsStateWithLifecycle()
-    val article = dueArticles.firstOrNull()
-    val card = if (article == null) dueCards.firstOrNull() else null
-    val totalDue = dueArticles.size + dueCards.size
-    var revealedKey by remember { mutableStateOf("") }
+private fun FiqhCard(card:StudyCardEntity,vm:MainViewModel) {
+    var reveal by remember(card.id){mutableStateOf(false)}
+    var reminder by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().padding(vertical=6.dp)) {
+        Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                Text(card.title,fontWeight=FontWeight.Bold,color=FocusNavy,modifier=Modifier.weight(1f))
+                TextButton({reminder=true}){Text("⏰")}
+            }
+            Text(card.prompt)
+            if(reveal) {
+                HorizontalDivider()
+                Text(card.answer,color=FocusGreen,lineHeight=24.sp)
+            } else {
+                OutlinedButton(onClick={reveal=true},modifier=Modifier.fillMaxWidth()){Text("نمایش پاسخ / ترجمه")}
+            }
+        }
+    }
+    if(reminder) ReminderDialog(
+        title=card.title,onDismiss={reminder=false},
+        onSelect={delay->
+            vm.scheduleReminder("FIQH",card.id,"مرور متون فقه: ${card.title}",card.prompt,delay)
+            reminder=false
+        }
+    )
+}
 
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text("مرور اجباری امروز", style = MaterialTheme.typography.headlineSmall)
-        if (article == null && card == null) {
-            Spacer(Modifier.height(24.dp))
-            Text("صف مرور صفر شد. حالا محتوای جدید امروز باز است.")
+@Composable
+private fun VocabularyScreen(vm: MainViewModel) {
+    val cards by vm.cards.collectAsStateWithLifecycle()
+    var domain by remember { mutableStateOf("VOCAB") }
+    val list=cards.filter{it.domain==domain}.sortedBy{it.ordinal}
+    var index by remember(domain,list.size){mutableStateOf(0)}
+    val card=list.getOrNull(index.coerceIn(0,(list.size-1).coerceAtLeast(0)))
+
+    Column(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            if(domain=="VOCAB") Button({domain="VOCAB"},Modifier.weight(1f)){Text("انگلیسی ۲۰۰۰")}
+            else OutlinedButton({domain="VOCAB"},Modifier.weight(1f)){Text("انگلیسی ۲۰۰۰")}
+            if(domain=="ARABIC") Button({domain="ARABIC"},Modifier.weight(1f)){Text("عربی ۱۰۰۰")}
+            else OutlinedButton({domain="ARABIC"},Modifier.weight(1f)){Text("عربی ۱۰۰۰")}
+        }
+        if(card==null) {
+            Text("بانک واژگان در حال بارگذاری است.")
             return@Column
         }
-        Text("$totalDue مورد در صف", color = MaterialTheme.colorScheme.secondary)
-        LinearProgressIndicator(progress = { 1f / totalDue.coerceAtLeast(1) }, modifier = Modifier.fillMaxWidth())
-
-        if (article != null) {
-            val key = "CIVIL:${article.articleNumber}"
-            val revealed = revealedKey == key
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("ماده ${article.articleNumber}", style = MaterialTheme.typography.titleLarge)
-                    Text(article.recallQuestion.ifBlank { "حکم و مفهوم ماده را بدون نگاه کردن بازگو کن." })
-                    if (!revealed) Button(onClick = { revealedKey = key }, modifier = Modifier.fillMaxWidth()) { Text("نمایش پاسخ") }
-                    else {
-                        HorizontalDivider()
-                        Text(article.officialText)
-                        if (article.simpleExplanation.isNotBlank()) Text(article.simpleExplanation)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedButton(onClick = { vm.gradeReview(article, ReviewResult.DONT_KNOW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
-                                OutlinedButton(onClick = { vm.gradeReview(article, ReviewResult.HARD); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
-                                Button(onClick = { vm.gradeReview(article, ReviewResult.KNEW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
-                            }
-                            TextButton(onClick = { vm.master(article); revealedKey = "" }, modifier = Modifier.fillMaxWidth()) { Text("مسلط شدم؛ از چرخه خارج کن") }
-                        }
-                    }
-                }
+        Text("کارت ${index+1} از ${list.size}",color=Color(0xFF667782))
+        VocabularyFlashCard(
+            card=card,
+            isEnglish=domain=="VOCAB",
+            onCorrect={
+                index=if(index+1<list.size) index+1 else 0
+            },
+            onWrong={
+                val type=if(domain=="VOCAB") "ENGLISH" else "ARABIC"
+                vm.scheduleReminder(
+                    type,card.id,
+                    "مرور ۲۴ ساعته لغت: ${card.title}",
+                    "${card.title} → ${card.answer}",
+                    24L*60*60*1000
+                )
+                index=if(index+1<list.size) index+1 else 0
+            },
+            onCustomReminder={ delay ->
+                val type=if(domain=="VOCAB") "ENGLISH" else "ARABIC"
+                vm.scheduleReminder(type,card.id,"مرور لغت: ${card.title}","${card.title} → ${card.answer}",delay)
             }
-        } else if (card != null) {
-            val key = card.id
-            val revealed = revealedKey == key
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(card.title, style = MaterialTheme.typography.titleLarge)
-                    Text(card.prompt)
-                    if (!revealed) Button(onClick = { revealedKey = key }, modifier = Modifier.fillMaxWidth()) { Text("نمایش پاسخ") }
-                    else {
-                        HorizontalDivider()
-                        Text(card.answer)
-                        if (card.explanation.isNotBlank()) Text(card.explanation)
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                OutlinedButton(onClick = { vm.gradeReview(card, ReviewResult.DONT_KNOW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("نمی‌دانستم") }
-                                OutlinedButton(onClick = { vm.gradeReview(card, ReviewResult.HARD); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("سخت بود") }
-                                Button(onClick = { vm.gradeReview(card, ReviewResult.KNEW); revealedKey = "" }, modifier = Modifier.weight(1f)) { Text("بلد بودم") }
-                            }
-                            TextButton(onClick = { vm.master(card); revealedKey = "" }, modifier = Modifier.fillMaxWidth()) { Text("مسلط شدم؛ از چرخه خارج کن") }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ProgressScreen(vm: MainViewModel) {
-    val articles by vm.articles.collectAsStateWithLifecycle()
-    val cards by vm.studyCards.collectAsStateWithLifecycle()
-    val dueCount by vm.dueCount.collectAsStateWithLifecycle()
-    val effectiveDay by vm.effectiveDay.collectAsStateWithLifecycle()
-    val backupStatus by vm.backupStatus.collectAsStateWithLifecycle()
-    val masteredCivil = articles.count { it.explicitMastered }
-    val masteredCards = cards.count { it.explicitMastered }
-
-    val exportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json")
-    ) { uri -> if (uri != null) vm.exportBackup(uri) }
-    val importLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri -> if (uri != null) vm.importBackup(uri) }
-
-    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("پیشرفت", style = MaterialTheme.typography.headlineSmall) }
-        item { MetricCard("روز برنامه", "$effectiveDay / ۱۴۰", "آزمون: ۱۶ بهمن ۱۴۰۵") }
-        item { MetricCard("قانون مدنی جاری", "${articles.size} ماده فعال", "$masteredCivil ماده با تسلط صریح؛ مواد منسوخ رسمی نمایش داده نمی‌شوند") }
-        item { MetricCard("کارت‌های تجارت/فقه/زبان", cards.size.toString(), "$masteredCards کارت مسلط") }
-        item { MetricCard("مرور باقی‌مانده امروز", dueCount.toString(), "تا صفر نشود محتوای جدید قفل است") }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("پشتیبان پیشرفت", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "فقط وضعیت مطالعه، مرور، تسلط، یادداشت و پیشرفت ۱۴۰روزه ذخیره می‌شود؛ متن رسمی قوانین از Backup بازیابی نمی‌شود.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = { exportLauncher.launch("mizan-phd1406-progress.json") },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("ذخیره پشتیبان") }
-                        OutlinedButton(
-                            onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) },
-                            modifier = Modifier.weight(1f),
-                        ) { Text("بازیابی") }
-                    }
-                    if (backupStatus.isNotBlank()) Text(backupStatus, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
-}
-@Composable
-private fun SearchScreen(vm: MainViewModel) {
-    val query by vm.searchQuery.collectAsStateWithLifecycle()
-    val articles by vm.searchArticles.collectAsStateWithLifecycle()
-    val cards by vm.searchCards.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Text("جستجو در همه منابع", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(12.dp))
-        OutlinedTextField(
-            value = query,
-            onValueChange = vm::setSearchQuery,
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            label = { Text("ماده، واژه، فقه یا تجارت") },
         )
-        Spacer(Modifier.height(8.dp))
-        LazyColumn {
-            if (query.isNotBlank()) {
-                items(articles.take(50), key = { "a:${it.articleNumber}" }) { article ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                        Text("مدنی — ماده ${article.articleNumber}", style = MaterialTheme.typography.titleMedium)
-                        Text(article.officialText, maxLines = 3)
+    }
+}
+
+@Composable
+private fun VocabularyFlashCard(
+    card:StudyCardEntity,
+    isEnglish:Boolean,
+    onCorrect:()->Unit,
+    onWrong:()->Unit,
+    onCustomReminder:(Long)->Unit,
+) {
+    var back by remember(card.id){mutableStateOf(false)}
+    var reminder by remember {mutableStateOf(false)}
+    Card(
+        modifier=Modifier.fillMaxWidth().height(330.dp).clickable{back=!back},
+        shape=RoundedCornerShape(24.dp),
+        colors=CardDefaults.cardColors(containerColor=if(back) Color(0xFFEAF6EC) else Color(0xFFEAF1FA))
+    ) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement=Arrangement.Center
+        ) {
+            Text(if(back) "پشت کارت" else "روی کارت",color=Color(0xFF71818A),fontSize=12.sp)
+            Spacer(Modifier.height(18.dp))
+            Text(
+                if(back) card.answer else card.title,
+                style=MaterialTheme.typography.headlineMedium,
+                color=if(back) FocusGreen else FocusNavy,
+                fontWeight=FontWeight.Bold
+            )
+            Spacer(Modifier.height(14.dp))
+            Text(if(back) "معنی فارسی" else if(isEnglish) "برای دیدن معنی روی کارت بزن" else "برای دیدن معنی فارسی روی کارت بزن")
+        }
+    }
+    if(back) {
+        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick=onWrong,modifier=Modifier.weight(1f),colors=ButtonDefaults.outlinedButtonColors(contentColor=SoftRed)){
+                Text("نادرست")
+            }
+            Button(onClick=onCorrect,modifier=Modifier.weight(1f),colors=ButtonDefaults.buttonColors(containerColor=FocusGreen)){
+                Text("درست")
+            }
+        }
+        Text(
+            "«نادرست» = این لغت خودکار برای ۲۴ ساعت بعد وارد مرور می‌شود.",
+            color=Color(0xFF687984),
+            fontSize=12.sp
+        )
+    }
+    OutlinedButton(onClick={reminder=true},modifier=Modifier.fillMaxWidth()){Text("⏰ یادآوری سفارشی")}
+    if(reminder) ReminderDialog(
+        title="لغت ${card.title}",
+        onDismiss={reminder=false},
+        onSelect={delay->onCustomReminder(delay);reminder=false}
+    )
+}
+
+@Composable
+private fun PlannerScreen(vm:MainViewModel) {
+    val context=LocalContext.current
+    val tasks by vm.plannerTasks.collectAsStateWithLifecycle()
+    val sound by vm.soundUri.collectAsStateWithLifecycle()
+    val todayPersian=PersianCalendar.fromGregorian(LocalDate.now()).numeric()
+    var title by remember{mutableStateOf("")}
+    var details by remember{mutableStateOf("")}
+    var date by remember{mutableStateOf(todayPersian)}
+    var time by remember{mutableStateOf("20:00")}
+    var message by remember{mutableStateOf("")}
+
+    val ringtoneLauncher=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()){ result->
+        val uri = if(Build.VERSION.SDK_INT>=33) {
+            result.data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            result.data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        }
+        if(uri!=null) vm.setSound(uri.toString())
+    }
+
+    LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
+        item {
+            Text("برنامه‌ریز و آلارم شخصی",style=MaterialTheme.typography.headlineSmall,color=FocusNavy)
+            Text("کارهای امروز و آینده را با تاریخ شمسی، ساعت، آلارم و نوتیفیکیشن ثبت کن.",color=Color(0xFF667782))
+        }
+        item {
+            Card(colors=CardDefaults.cardColors(containerColor=Color.White)) {
+                Column(Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(title,{title=it},Modifier.fillMaxWidth(),label={Text("عنوان کار")})
+                    OutlinedTextField(details,{details=it},Modifier.fillMaxWidth(),label={Text("توضیحات")})
+                    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(date,{date=it},Modifier.weight(1f),label={Text("تاریخ شمسی")},placeholder={Text("۱۴۰۵/۰۷/۰۱")})
+                        OutlinedTextField(time,{time=it},Modifier.weight(1f),label={Text("ساعت")},placeholder={Text("20:00")})
                     }
-                    HorizontalDivider()
+                    OutlinedButton(
+                        onClick={
+                            val intent=Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE,RingtoneManager.TYPE_ALARM)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT,true)
+                                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT,false)
+                                if(sound.isNotBlank()) putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI,Uri.parse(sound))
+                            }
+                            ringtoneLauncher.launch(intent)
+                        },
+                        modifier=Modifier.fillMaxWidth()
+                    ){Text(if(sound.isBlank()) "انتخاب صدای آلارم" else "تغییر صدای آلارم ✓")}
+                    ExactAlarmPermissionButton()
+                    Button(
+                        onClick={
+                            if(title.isBlank()) message="عنوان کار را وارد کن."
+                            else {
+                                message=vm.addPlannerTask(title,details,date,time) ?: "برنامه و آلارم ثبت شد."
+                                if(message.startsWith("برنامه")) { title=""; details="" }
+                            }
+                        },
+                        modifier=Modifier.fillMaxWidth()
+                    ){Text("ثبت برنامه و آلارم")}
+                    if(message.isNotBlank()) Text(message,color=if(message.startsWith("برنامه"))FocusGreen else SoftRed)
                 }
-                items(cards.take(50), key = { "c:${it.id}" }) { card ->
-                    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                        Text("${card.domain} — ${card.title}", style = MaterialTheme.typography.titleMedium)
-                        Text(card.prompt, maxLines = 3)
+            }
+        }
+        item { Text("برنامه‌های ثبت‌شده",style=MaterialTheme.typography.titleLarge,color=FocusNavy) }
+        items(tasks,key={it.id}) { task->
+            Card(colors=CardDefaults.cardColors(containerColor=if(task.completed) Color(0xFFE7F3E9) else Color.White)) {
+                Column(Modifier.padding(13.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
+                    Text(task.title,fontWeight=FontWeight.Bold,textDecoration=if(task.completed) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                    Text("${task.persianDate} • ${task.timeText}",color=FocusBlue)
+                    if(task.details.isNotBlank()) Text(task.details,fontSize=13.sp)
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Button(onClick={vm.togglePlannerDone(task)}){Text(if(task.completed)"فعال کن" else "انجام شد")}
+                        TextButton(onClick={vm.deletePlanner(task)}){Text("حذف",color=SoftRed)}
                     }
-                    HorizontalDivider()
                 }
-            } else item { Text("عبارت جستجو را وارد کن.", Modifier.padding(20.dp)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExactAlarmPermissionButton() {
+    val context=LocalContext.current
+    if(Build.VERSION.SDK_INT>=31) {
+        val am=context.getSystemService(AlarmManager::class.java)
+        if(!am.canScheduleExactAlarms()) {
+            OutlinedButton(
+                onClick={
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data=Uri.parse("package:${context.packageName}")
+                            }
+                        )
+                    }
+                },
+                modifier=Modifier.fillMaxWidth()
+            ){Text("اجازه آلارم دقیق اندروید")}
         }
     }
 }
