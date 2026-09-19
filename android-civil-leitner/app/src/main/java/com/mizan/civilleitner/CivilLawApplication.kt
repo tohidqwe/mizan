@@ -4,7 +4,7 @@ import android.app.Application
 import com.mizan.civilleitner.data.AppDatabase
 import com.mizan.civilleitner.data.StudyCardImporter
 import com.mizan.civilleitner.data.VerifiedArticleImporter
-import com.mizan.civilleitner.worker.ReminderScheduler
+import com.mizan.civilleitner.worker.LearningAlarmScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,11 +18,9 @@ class CivilLawApplication : Application() {
         super.onCreate()
         CrashGuard.install(this)
         appScope.launch {
-            // Non-destructive startup integrity check: missing official rows are repaired, progress is preserved.
             VerifiedArticleImporter.importBundledSeedAndRepair(this@CivilLawApplication, database)
             StudyCardImporter.importBundledCardsIfPresent(this@CivilLawApplication, database)
-            ReminderScheduler.refreshNow(this@CivilLawApplication)
+            LearningAlarmScheduler.rescheduleEverything(this@CivilLawApplication)
         }
-        ReminderScheduler.scheduleAll(this)
     }
 }

@@ -9,165 +9,240 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.mizan.civilleitner.MainActivity
 import com.mizan.civilleitner.data.AppDatabase
-import com.mizan.civilleitner.domain.Phd140DayPlan
+import com.mizan.civilleitner.data.PlannerTaskEntity
+import com.mizan.civilleitner.data.ReminderEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.time.LocalDate
-import java.time.ZonedDateTime
+import kotlin.math.absoluteValue
 
-class ReminderAlarmReceiver : BroadcastReceiver() {
+class LearningAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val hour = intent.getIntExtra(EXTRA_HOUR, 8)
-        val minute = intent.getIntExtra(EXTRA_MINUTE, 0)
-        val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                ReminderScheduler.refreshNow(context.applicationContext)
-                ReminderScheduler.scheduleSlot(context.applicationContext, hour, minute)
-            } finally {
-                pendingResult.finish()
+        val kind = intent.getStringExtra(EXTRA_KIND) ?: return
+        val id = intent.getLongExtra(EXTRA_ID, -1L)
+        val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val body = intent.getStringExtra(EXTRA_BODY).orEmpty()
+        val sound = intent.getStringExtra(EXTRA_SOUND).orEmpty()
+
+        LearningNotifications.show(context, kind, id, title, body, sound)
+
+        if (kind == KIND_REVIEW && id > 0) {
+            val pending = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    AppDatabase.get(context).reminderDao().markFired(id, System.currentTimeMillis())
+                } finally {
+                    pending.finish()
+                }
             }
         }
     }
 
     companion object {
-        const val EXTRA_HOUR = "hour"
-        const val EXTRA_MINUTE = "minute"
+        const val KIND_REVIEW = "review"
+        const val KIND_PLANNER = "planner"
+        const val EXTRA_KIND = "kind"
+        const val EXTRA_ID = "id"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_BODY = "body"
+        const val EXTRA_SOUND = "sound"
     }
 }
 
-class ReminderBootReceiver : BroadcastReceiver() {
+class LearningBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
-        ) {
-            ReminderScheduler.scheduleAll(context.applicationContext)
+        if (intent.action !in setOf(Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED)) return
+        val pending = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                LearningAlarmScheduler.rescheduleEverything(context.applicationContext)
+            } finally {
+                pending.finish()
+            }
         }
     }
 }
 
-object ReviewNotification {
-    const val ID = 1001
-    private const val CHANNEL_ID = "exam_review_strict_v2"
+object LearningNotifications {
+    private const val GROUP = "dr_tohid_learning"
 
-    fun show(context: Context, due: Int, effectiveDay: Int, dayIncomplete: Boolean) {
+    fun show(context: Context, kind: String, id: Long, title: String, body: String, soundUri: String) {
         val manager = context.getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "یادآوری اجباری آزمون دکتری",
+        val channelId = channelId(kind, soundUri)
+        val uri = soundUri.takeIf { it.isNotBlank() }?.let(Uri::parse)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                if (kind == LearningAlarmReceiver.KIND_PLANNER) "برنامه‌ریزی شخصی" else "مرور مطالب",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "مرورهای سررسیدشده و مأموریت روز تا اتمام کامل یادآوری می‌شوند."
-                setShowBadge(true)
+                description = "یادآوری‌های دوره آموزشی دکتر توحید نجفیان"
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 450, 220, 450)
+                vibrationPattern = longArrayOf(0, 450, 180, 450)
+                if (uri != null) {
+                    val attrs = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    setSound(uri, attrs)
+                }
             }
-        )
+            manager.createNotificationChannel(channel)
+        }
 
-        if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS,
-            ) != PackageManager.PERMISSION_GRANTED
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
 
-        val intent = Intent(context, MainActivity::class.java).apply {
+        val openIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("openKind", kind)
+            putExtra("openId", id)
         }
         val pending = PendingIntent.getActivity(
             context,
-            1001,
-            intent,
+            (kind.hashCode() * 31 + id.hashCode()).absoluteValue,
+            openIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val title = when {
-            due > 0 -> "مرور اجباری عقب افتاده است"
-            dayIncomplete -> "روز $effectiveDay هنوز تمام نشده"
-            else -> "برنامه امروز"
-        }
-        val body = when {
-            due > 0 -> "$due مرور سررسیدشده باقی مانده؛ محتوای جدید قفل است."
-            dayIncomplete -> "ماموریت‌های روز $effectiveDay را کامل کن؛ برنامه تا اتمام روز جلو نمی‌رود."
-            else -> "برنامه امروز کامل است."
-        }
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_popup_reminder)
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pending)
-            .setOngoing(due > 0 || dayIncomplete)
-            .setAutoCancel(false)
-            .setOnlyAlertOnce(false)
+            .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setVibrate(longArrayOf(0, 450, 220, 450))
+            .setGroup(GROUP)
             .build()
 
-        NotificationManagerCompat.from(context).notify(ID, notification)
+        NotificationManagerCompat.from(context).notify((id % Int.MAX_VALUE).toInt().coerceAtLeast(1), notification)
     }
 
-    fun cancel(context: Context) {
-        NotificationManagerCompat.from(context).cancel(ID)
-    }
+    private fun channelId(kind: String, sound: String): String =
+        "dr_tohid_${kind}_${sound.hashCode().absoluteValue}"
 }
 
-object ReminderScheduler {
-    private val slots = listOf(8 to 0, 14 to 0, 20 to 0)
+object LearningAlarmScheduler {
+    suspend fun addReview(
+        context: Context,
+        targetType: String,
+        targetId: String,
+        title: String,
+        preview: String,
+        intervalHours: Int,
+        soundUri: String,
+    ): Long {
+        val due = System.currentTimeMillis() + intervalHours * 60L * 60L * 1000L
+        val dao = AppDatabase.get(context).reminderDao()
+        val id = dao.upsert(
+            ReminderEntity(
+                targetType = targetType,
+                targetId = targetId,
+                title = title,
+                preview = preview.take(300),
+                dueAtMillis = due,
+                intervalHours = intervalHours,
+                soundUri = soundUri,
+            )
+        )
+        scheduleReview(context, dao.getById(id)!!)
+        return id
+    }
 
-    suspend fun refreshNow(context: Context) {
+    suspend fun schedulePlanner(context: Context, item: PlannerTaskEntity) {
+        if (!item.alarmEnabled || item.completed || item.dueAtMillis <= System.currentTimeMillis()) return
+        schedule(
+            context,
+            requestCode = plannerCode(item.id),
+            triggerAt = item.dueAtMillis,
+            kind = LearningAlarmReceiver.KIND_PLANNER,
+            id = item.id,
+            title = "برنامه: ${item.title}",
+            body = item.details.ifBlank { "${item.persianDate} • %02d:%02d".format(item.hour, item.minute) },
+            soundUri = item.soundUri,
+        )
+    }
+
+    suspend fun rescheduleEverything(context: Context) {
         val db = AppDatabase.get(context)
-        val today = LocalDate.now().toEpochDay()
-        val due = db.articleDao().dueCount(today) + db.studyCardDao().dueCount(today)
+        db.reminderDao().activeSnapshot()
+            .filter { it.dueAtMillis > System.currentTimeMillis() }
+            .forEach { scheduleReview(context, it) }
+        db.plannerTaskDao().activeFutureSnapshot(System.currentTimeMillis())
+            .forEach { schedulePlanner(context, it) }
+    }
 
-        val calendarDay = Phd140DayPlan.calendarDay()
-        val completed = db.planDao().completedDaysSnapshot().toSet()
-        val effectiveDay = (1..calendarDay).firstOrNull { it !in completed } ?: calendarDay
-        val dayIncomplete = db.planDao().getDay(effectiveDay)?.dayCompleted != true
+    fun cancelPlanner(context: Context, id: Long) = cancel(context, plannerCode(id))
+    fun cancelReview(context: Context, id: Long) = cancel(context, reviewCode(id))
 
-        if (due > 0 || dayIncomplete) {
-            ReviewNotification.show(context, due, effectiveDay, dayIncomplete)
-        } else {
-            ReviewNotification.cancel(context)
+    private fun scheduleReview(context: Context, item: ReminderEntity) {
+        schedule(
+            context = context,
+            requestCode = reviewCode(item.id),
+            triggerAt = item.dueAtMillis,
+            kind = LearningAlarmReceiver.KIND_REVIEW,
+            id = item.id,
+            title = "زمان مرور: ${item.title}",
+            body = item.preview,
+            soundUri = item.soundUri,
+        )
+    }
+
+    private fun schedule(
+        context: Context,
+        requestCode: Int,
+        triggerAt: Long,
+        kind: String,
+        id: Long,
+        title: String,
+        body: String,
+        soundUri: String,
+    ) {
+        val intent = Intent(context, LearningAlarmReceiver::class.java).apply {
+            putExtra(LearningAlarmReceiver.EXTRA_KIND, kind)
+            putExtra(LearningAlarmReceiver.EXTRA_ID, id)
+            putExtra(LearningAlarmReceiver.EXTRA_TITLE, title)
+            putExtra(LearningAlarmReceiver.EXTRA_BODY, body)
+            putExtra(LearningAlarmReceiver.EXTRA_SOUND, soundUri)
         }
-    }
-
-    fun scheduleAll(context: Context) {
-        slots.forEach { (hour, minute) -> scheduleSlot(context, hour, minute) }
-    }
-
-    fun scheduleNext(context: Context, hour: Int, minute: Int) = scheduleSlot(context, hour, minute)
-
-    fun scheduleSlot(context: Context, hour: Int, minute: Int) {
-        val now = ZonedDateTime.now()
-        var target = now.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
-        if (!target.isAfter(now)) target = target.plusDays(1)
-
-        val alarmIntent = Intent(context, ReminderAlarmReceiver::class.java)
-            .putExtra(ReminderAlarmReceiver.EXTRA_HOUR, hour)
-            .putExtra(ReminderAlarmReceiver.EXTRA_MINUTE, minute)
-        val requestCode = hour * 100 + minute
         val pending = PendingIntent.getBroadcast(
             context,
             requestCode,
-            alarmIntent,
+            intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-
-        val alarmManager = context.getSystemService(AlarmManager::class.java)
-        alarmManager.setAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP,
-            target.toInstant().toEpochMilli(),
-            pending,
-        )
+        val am = context.getSystemService(AlarmManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) {
+            am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        } else {
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        }
     }
+
+    private fun cancel(context: Context, requestCode: Int) {
+        val intent = Intent(context, LearningAlarmReceiver::class.java)
+        val pending = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+        ) ?: return
+        context.getSystemService(AlarmManager::class.java).cancel(pending)
+        pending.cancel()
+    }
+
+    private fun reviewCode(id: Long): Int = (100_000 + id % 700_000).toInt()
+    private fun plannerCode(id: Long): Int = (900_000 + id % 700_000).toInt()
 }
