@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -188,13 +189,12 @@ private fun Modifier.detectDrag(
     onDrag: (Offset) -> Unit,
     onEnd: () -> Unit,
     onCancel: () -> Unit,
-): Modifier = androidx.compose.ui.input.pointer.pointerInput(Unit) {
+): Modifier = this.pointerInput(Unit) {
     detectDragGestures(
         onDragStart = { onStart() },
         onDragEnd = onEnd,
         onDragCancel = onCancel,
         onDrag = { change, dragAmount ->
-            change.consume()
             onDrag(dragAmount)
         }
     )
@@ -241,15 +241,14 @@ fun LinkPuzzle(
             .onSizeChanged { boardSize = it }
             .padding(6.dp)
             .then(
-                androidx.compose.ui.Modifier.pointerInput(level.articleNumber, boardSize) {
+                Modifier.pointerInput(level.articleNumber, boardSize) {
                     detectDragGestures(
                         onDragStart = { pos ->
                             startId = nearest(pos)
                             pointer = pos
                         },
                         onDrag = { change, _ ->
-                            change.consume()
-                            pointer = change.position
+                                            pointer = change.position
                         },
                         onDragCancel = {
                             startId = null
