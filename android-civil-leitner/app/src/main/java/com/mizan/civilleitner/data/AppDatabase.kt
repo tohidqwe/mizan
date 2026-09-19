@@ -240,6 +240,9 @@ interface ReminderDao {
     @Query("SELECT * FROM reminders WHERE enabled = 1 ORDER BY dueAtMillis ASC")
     fun observeActive(): Flow<List<ReminderEntity>>
 
+    @Query("SELECT * FROM reminders WHERE enabled = 1 ORDER BY dueAtMillis ASC")
+    suspend fun activeSnapshot(): List<ReminderEntity>
+
     @Query("SELECT * FROM reminders WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): ReminderEntity?
 
@@ -257,6 +260,9 @@ interface ReminderDao {
 interface PlannerDao {
     @Query("SELECT * FROM planner_tasks ORDER BY completed ASC, dueAtMillis ASC")
     fun observeAll(): Flow<List<PlannerTaskEntity>>
+
+    @Query("SELECT * FROM planner_tasks WHERE completed = 0 ORDER BY dueAtMillis ASC")
+    suspend fun activeSnapshot(): List<PlannerTaskEntity>
 
     @Query("SELECT * FROM planner_tasks WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): PlannerTaskEntity?
