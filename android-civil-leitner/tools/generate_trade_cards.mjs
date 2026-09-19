@@ -181,6 +181,40 @@ for(const [n,needle] of [[1,'سهامي'],[300,'دولتي']]){
   if(!text.includes(needle)) throw new Error(`Qavanin 1347-amendment spot-check failed for Article ${n}: ${needle}`);
 }
 
+const allLibrary=[];
+const inactiveOriginalSet=new Set(parsed.inactiveOriginal);
+const inactiveAmendSet=new Set(parsed.inactiveAmendment);
+for(const item of parsed.originals){
+  const historical=item.number>=21 && item.number<=93;
+  allLibrary.push({
+    id:`TRADE:T1311:${String(item.number).padStart(3,'0')}`,
+    collection:'T1311',
+    collectionLabel:'قانون تجارت ۱۳۱۱',
+    articleNumber:item.number,
+    articleKey:String(item.number),
+    officialText:normalizeDisplayText(item.text),
+    legalStatus:inactiveOriginalSet.has(item.number)?'REPEALED':historical?'HISTORICAL_REPLACED_1347':'ACTIVE',
+    statusLabel:normalizeDisplayText(item.statusLabel||''),
+    sourceName:'سامانه ملی قوانین و مقررات جمهوری اسلامی ایران (Qavanin.ir)',
+    sourceUrl:QAVANIN_PRINT
+  });
+}
+for(const item of parsed.amendments){
+  allLibrary.push({
+    id:`TRADE:L1347:${String(item.number).padStart(3,'0')}`,
+    collection:'L1347',
+    collectionLabel:'لایحه قانونی اصلاح قسمتی از قانون تجارت ۱۳۴۷',
+    articleNumber:item.number,
+    articleKey:String(item.number),
+    officialText:normalizeDisplayText(item.text),
+    legalStatus:inactiveAmendSet.has(item.number)?'REPEALED':'ACTIVE',
+    statusLabel:normalizeDisplayText(item.statusLabel||''),
+    sourceName:'سامانه ملی قوانین و مقررات جمهوری اسلامی ایران (Qavanin.ir)',
+    sourceUrl:QAVANIN_PRINT
+  });
+}
+if(allLibrary.length!==900) throw new Error(`Full trade-law library must contain 900 numbered provisions, got ${allLibrary.length}`);
+
 const cards=[];
 function pushCard(collection,label,item){
   const displayText = normalizeDisplayText(item.text);
@@ -238,12 +272,14 @@ const manifest={
 };
 
 await fs.writeFile(`${OUT}/trade_cards.json`,JSON.stringify(cards,null,2),'utf8');
+await fs.writeFile(`${OUT}/trade_all_articles.json`,JSON.stringify(allLibrary,null,2),'utf8');
 await fs.writeFile(`${OUT}/trade_source_manifest.json`,JSON.stringify(manifest,null,2),'utf8');
 console.log(JSON.stringify({
   TRADE_GATE:'PASS',
   currentOriginal:parsed.currentOriginal.length,
   currentAmendment:parsed.currentAmendment.length,
   activeCards:cards.length,
+  fullLibraryCount:allLibrary.length,
   inactiveOriginal:parsed.inactiveOriginal,
   inactiveAmendment:parsed.inactiveAmendment
 },null,2));
