@@ -213,7 +213,11 @@ for(const item of parsed.amendments){
     sourceUrl:QAVANIN_PRINT
   });
 }
-if(allLibrary.length!==900) throw new Error(`Full trade-law library must contain 900 numbered provisions, got ${allLibrary.length}`);
+const sourceLibraryCount=parsed.originals.length+parsed.amendments.length;
+if(allLibrary.length!==sourceLibraryCount) throw new Error(`Trade-law source library count mismatch: expected ${sourceLibraryCount}, got ${allLibrary.length}`);
+if(sourceLibraryCount + parsed.omittedOriginal.length + parsed.omittedAmendment.length !== 900) {
+  throw new Error('Trade source accounting does not reconcile to 600 original + 300 amendment provisions');
+}
 
 const cards=[];
 function pushCard(collection,label,item){
@@ -280,6 +284,8 @@ console.log(JSON.stringify({
   currentAmendment:parsed.currentAmendment.length,
   activeCards:cards.length,
   fullLibraryCount:allLibrary.length,
+  sourceUniverseCount:900,
+  sourceOmittedTotal:parsed.omittedOriginal.length+parsed.omittedAmendment.length,
   inactiveOriginal:parsed.inactiveOriginal,
   inactiveAmendment:parsed.inactiveAmendment
 },null,2));
