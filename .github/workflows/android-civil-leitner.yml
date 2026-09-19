@@ -9,6 +9,7 @@ on:
     branches:
       - main
       - feature/civil-law-leitner-v0.1
+      - product/tohid-phd-course-v1
     paths:
       - 'android-civil-leitner/**'
       - '.github/workflows/android-civil-leitner.yml'
@@ -22,8 +23,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate 1000-word English bank
+      - name: Generate 2000-word English bank
         run: node android-civil-leitner/tools/generate_vocab_cards.mjs
+
+      - name: Generate 1000-word Arabic-Persian bank
+        run: node android-civil-leitner/tools/generate_arabic_vocab_cards.mjs
 
       - name: Generate active fiqh bank
         run: node android-civil-leitner/tools/generate_fiqh_cards.mjs
@@ -48,9 +52,6 @@ jobs:
       - name: Generate current Qavanin trade-law bank
         run: node android-civil-leitner/tools/generate_trade_cards.mjs
 
-      - name: Generate conceptual explanations for every active Civil Code article
-        run: node android-civil-leitner/tools/enrich_civil_explanations.mjs
-
       - name: Validate 1335-article legal seed
         shell: bash
         run: |
@@ -72,12 +73,8 @@ jobs:
           assert all(x.get('verificationStatus') in {'VERIFIED_OFFICIAL','VERIFIED_RRK'} for x in seed), 'unverified article found'
           assert all(x.get('source1','').strip() and x.get('source2','').strip() for x in seed), 'missing provenance reference'
           active = [x for x in seed if x.get('topic') != 'ماده منسوخ']
-          assert all(len(x.get('simpleExplanation','').strip()) >= 90 for x in active), 'missing/short civil conceptual explanation'
-          assert all(len(x.get('analyticalPoint','').strip()) >= 80 for x in active), 'missing/short civil analytical point'
-          assert len({x['simpleExplanation'].strip() for x in active}) == len(active), 'duplicate civil conceptual explanation'
-          assert len({x['analyticalPoint'].strip() for x in active}) == len(active), 'duplicate civil analytical point'
-          assert manifest['activeConceptExplanationCount'] == len(active)
-          assert manifest['activeAnalyticalPointCount'] == len(active)
+          # New product policy: legal screens expose official statutory text only.
+          # Analytical/explanatory fields may remain as legacy migration columns but are not release requirements.
           assert manifest['mainArticleCount'] == 1335
           assert manifest['firstArticleNumber'] == 1 and manifest['lastArticleNumber'] == 1335
           assert manifest['officialSourceId'] == '12021850837713548188'
@@ -125,11 +122,20 @@ jobs:
           assert em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذرهبین' or em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذره‌بین'
           assert em['primaryReference']['providedByUser'] is True
           assert em['leitner']['intervalDays'] == [1,2,3,7,14,28]
-          assert len(english) == 1000
-          assert vm['count'] == 1000 and vm['allCardsHavePersianMeaning'] is True
-          assert [x['ordinal'] for x in english] == list(range(1,1001))
+          arabic = json.loads((assets / 'arabic_vocab_cards.json').read_text(encoding='utf-8'))
+          am = json.loads((assets / 'arabic_vocab_manifest.json').read_text(encoding='utf-8'))
+
+          assert len(english) == 2000
+          assert vm['count'] == 2000 and vm['allCardsHavePersianMeaning'] is True
+          assert [x['ordinal'] for x in english] == list(range(1,2001))
           assert all(x['domain'] == 'VOCAB' and x['answer'].strip() for x in english)
-          assert len({x['id'] for x in english}) == 1000
+          assert len({x['id'] for x in english}) == 2000
+          assert len({x['title'].strip().lower() for x in english}) == 2000
+
+          assert len(arabic) == 1000 and am['count'] == 1000
+          assert [x['ordinal'] for x in arabic] == list(range(1,1001))
+          assert all(x['domain'] == 'ARABIC' and x['title'].strip() and x['answer'].strip() for x in arabic)
+          assert len({x['title'].strip() for x in arabic}) == 1000
           assert len(em['initialHighFrequencyFamilies']) >= 14
           assert any(x['id'].startswith('VOCAB:FREQ:') for x in core)
           assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in core)
@@ -170,11 +176,12 @@ jobs:
           assert required.issubset(set(fm['requiredTopics']))
           assert fm['modernCommercialTranslationsCopied'] is False
 
-          ids = [x['id'] for x in core + english + trade + fiqh]
+          ids = [x['id'] for x in core + english + arabic + trade + fiqh]
           assert len(ids) == len(set(ids)), 'duplicate IDs across bundled curriculum assets'
 
           print('COMPLETE_CURRICULUM_GATE=PASS')
-          print('ENGLISH_WORDS=1000')
+          print('ENGLISH_WORDS=2000')
+          print('ARABIC_WORDS=1000')
           print('TRADE_CURRENT_UNITS=' + str(len(trade)))
           print('FIQH_CARDS=120')
           PY
