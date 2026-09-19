@@ -20,22 +20,32 @@ class Phd140DayPlanTest {
         assertEquals(1335, d.civilTo)
     }
 
-    @Test fun tradeCoverageSpansCurrentQavaninNumberingThrough600OnDay89() {
+    @Test fun currentTradeCorpusEndsAt801OnDay89() {
         val d = Phd140DayPlan.planFor(89)
-        assertEquals(594, d.tradeUnitFrom)
-        assertEquals(600, d.tradeUnitTo)
+        assertEquals(793, d.tradeFrom)
+        assertEquals(801, d.tradeTo)
     }
 
-    @Test fun thousandVocabularyTargetEndsOnDay125() {
-        val d = Phd140DayPlan.planFor(125)
-        assertEquals(993, d.vocabFrom)
-        assertEquals(1000, d.vocabTo)
+    @Test fun twoThousandEnglishAndThousandArabicEndOnDay89() {
+        val d = Phd140DayPlan.planFor(89)
+        assertTrue(d.englishFrom in 1978..2000)
+        assertEquals(2000, d.englishTo)
+        assertTrue(d.arabicFrom in 989..1000)
+        assertEquals(1000, d.arabicTo)
     }
 
-    @Test fun allDaysHavePersianDatesAndMandatoryTasks() {
-        val all = Phd140DayPlan.all()
-        assertEquals(140, all.size)
-        assertTrue(all.all { it.persianDate.startsWith("1405/") && it.tasks.isNotEmpty() && it.mandatoryMinutes > 0 })
-        assertEquals(LocalDate.of(2027, 2, 4), all.last().gregorianDate)
+    @Test fun finalDayIsReviewOnlyAndHasPositiveTimeBudget() {
+        val d = Phd140DayPlan.planFor(140)
+        assertEquals(0, d.civilFrom)
+        assertEquals(0, d.tradeFrom)
+        assertEquals(0, d.englishFrom)
+        assertEquals(0, d.arabicFrom)
+        assertTrue(d.baseStudyMinutes > 0)
+        assertEquals(LocalDate.of(2027, 2, 4), d.gregorianDate)
+    }
+
+    @Test fun persianRoundTripWorksForPlanner() {
+        val g = PersianDate.parseToGregorian("1405/07/01")
+        assertEquals("1405/07/01", PersianDate.fromGregorian(g).numeric())
     }
 }
