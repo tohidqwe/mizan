@@ -149,10 +149,14 @@ jobs:
           assert tm['sourceOriginalCount'] + len(tm['omittedOriginalBySource']) == 600
           assert tm['sourceAmendmentCount'] + len(tm['omittedAmendmentBySource']) == 300
           assert len(trade) == tm['activeCardCount']
-          assert len(trade_all) == 900 and tm['fullLibraryCount'] == 900
-          assert sum(1 for x in trade_all if x['collection'] == 'T1311') == 600
-          assert sum(1 for x in trade_all if x['collection'] == 'L1347') == 300
-          assert len({x['id'] for x in trade_all}) == 900
+          assert len(trade_all) == tm['fullLibraryCount']
+          assert len(trade_all) == tm['sourceOriginalCount'] + tm['sourceAmendmentCount']
+          assert tm['sourceUniverseCount'] == 900
+          assert tm['sourceOmittedTotal'] == len(tm['omittedOriginalBySource']) + len(tm['omittedAmendmentBySource'])
+          assert len(trade_all) + tm['sourceOmittedTotal'] == 900
+          assert sum(1 for x in trade_all if x['collection'] == 'T1311') == tm['sourceOriginalCount']
+          assert sum(1 for x in trade_all if x['collection'] == 'L1347') == tm['sourceAmendmentCount']
+          assert len({x['id'] for x in trade_all}) == len(trade_all)
           assert all(x['officialText'].strip() and x['sourceUrl'].startswith('https://qavanin.ir/') for x in trade_all)
           assert len(trade) == tm['currentOriginalCount'] + tm['currentAmendmentCount']
           assert len(trade) >= 750
@@ -189,7 +193,8 @@ jobs:
           print('ENGLISH_WORDS=2000')
           print('ARABIC_WORDS=1000')
           print('TRADE_CURRENT_UNITS=' + str(len(trade)))
-          print('TRADE_FULL_LIBRARY=900')
+          print('TRADE_SOURCE_LIBRARY=' + str(len(trade_all)))
+          print('TRADE_SOURCE_OMITTED=' + str(tm['sourceOmittedTotal']))
           print('FIQH_CARDS=120')
           PY
 
