@@ -2,18 +2,33 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:name=".CivilLawApplication"
         android:allowBackup="true"
-        android:label="حافظ قانون مدنی"
+        android:label="دوره آموزشی دکتر توحید نجفیان"
+        android:icon="@drawable/ic_tohid_law_power"
+        android:roundIcon="@drawable/ic_tohid_law_power"
         android:supportsRtl="true"
         android:theme="@style/Theme.CivilLawLeitner">
         <receiver
             android:name=".worker.ReminderAlarmReceiver"
             android:exported="false" />
         <receiver
+            android:name=".worker.StudyAlarmReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".worker.ReminderBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".worker.StudyAlarmBootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
