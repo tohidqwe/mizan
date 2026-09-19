@@ -1,5 +1,6 @@
 package com.mizan.civilleitner.worker
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,6 +11,8 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
+import android.content.pm.PackageManager
+import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.mizan.civilleitner.MainActivity
@@ -81,7 +84,9 @@ class StudyAlarmReceiver: BroadcastReceiver() {
                     StudyAlarmScheduler.KIND_STUDY -> {
                         val item=db.reminderDao().getById(id) ?: return@launch
                         show(context,item.title,item.body,item.soundUri,id)
-                        db.reminderDao().update(item.copy(enabled=false,firedCount=item.firedCount+1))
+                        // Keep the item due until the learner explicitly marks the review completed.
+                        // This makes the reminder visible on Today's review queue after the alarm fires.
+                        db.reminderDao().update(item.copy(firedCount=item.firedCount+1))
                     }
                     StudyAlarmScheduler.KIND_PLANNER -> {
                         val task=db.plannerDao().getById(id) ?: return@launch
@@ -93,6 +98,10 @@ class StudyAlarmReceiver: BroadcastReceiver() {
     }
 
     private fun show(context: Context,title:String,body:String,soundUri:String,id:Long) {
+        if (Build.VERSION.SDK_INT >= 33 && ActivityCompat.checkSelfPermission(
+                context, Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) return
         val manager=context.getSystemService(NotificationManager::class.java)
         val channelId="study_alarm_"+(soundUri.ifBlank{"default"}.hashCode().toUInt().toString())
         if(Build.VERSION.SDK_INT>=26) {
