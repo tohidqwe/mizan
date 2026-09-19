@@ -22,7 +22,16 @@ const manual=new Map([
  ['founds','بنیان می‌گذارد؛ تأسیس می‌کند'],['headquarter','مقر؛ ستاد مرکزی'],['historically','از نظر تاریخی'],
  ['individually','به‌صورت فردی؛ جداگانه'],['interviewer','مصاحبه‌کننده'],['morphological','ریخت‌شناختی؛ صرفی'],
  ['multi','چند؛ چندگانه'],['philosophical','فلسفی'],['pre','پیش؛ پیش از'],['randomly','به‌صورت تصادفی'],
- ['tech','فناوری؛ فنی'],['trans','فرا؛ آن‌سوی؛ در ترکیبات به‌معنای عبور یا انتقال']
+ ['tech','فناوری؛ فنی'],['trans','فرا؛ آن‌سوی؛ در ترکیبات به‌معنای عبور یا انتقال'],
+ ['broadly','به‌طور گسترده'],['correctly','به‌درستی'],['critically','به‌طور انتقادی؛ به‌شکل بحرانی'],
+ ['deliberately','عمداً؛ سنجیده'],['developmental','توسعه‌ای؛ مربوط به رشد'],['dimensional','بُعدی'],
+ ['economically','از نظر اقتصادی'],['enormously','به‌شدت؛ بسیار زیاد'],['explicitly','صریحاً'],
+ ['fundamentally','اساساً؛ به‌طور بنیادی'],['genetically','از نظر ژنتیکی'],['goodness','خوبی؛ نیکی'],
+ ['importantly','مهم‌تر اینکه؛ به‌طور مهم'],['independently','به‌طور مستقل'],['interestingly','جالب اینکه'],
+ ['interface','رابط؛ واسط'],['locally','به‌طور محلی'],['onwards','از آن پس؛ به بعد'],
+ ['positively','به‌طور مثبت'],['predominantly','عمدتاً؛ غالباً'],['statistically','از نظر آماری'],
+ ['strictly','به‌طور سخت‌گیرانه؛ دقیقاً'],['sufficiently','به‌اندازه کافی'],['supposedly','ظاهراً؛ بنا بر ادعا'],
+ ['terribly','بسیار؛ به‌شدت؛ به‌طرز بد'],['traditionally','به‌طور سنتی']
 ]);
 
 const examPriority=['autonomy','autonomous','indispensable','beneficial','compromise','demolish','demolition','distort','distorted','plausible','spontaneous','impose','diminish','longevity','inevitable','tangible','endeavor'];
