@@ -2,18 +2,26 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <queries>
+        <package android:name="com.google.android.apps.bard" />
+        <package android:name="com.deepseek.chat" />
+    </queries>
 
     <application
         android:name=".CivilLawApplication"
         android:allowBackup="true"
-        android:label="حافظ قانون مدنی"
+        android:label="دوره آموزشی دکتر توحید نجفیان"
+        android:icon="@drawable/ic_law_power"
+        android:roundIcon="@drawable/ic_law_power"
         android:supportsRtl="true"
         android:theme="@style/Theme.CivilLawLeitner">
         <receiver
-            android:name=".worker.ReminderAlarmReceiver"
+            android:name=".worker.LearningAlarmReceiver"
             android:exported="false" />
         <receiver
-            android:name=".worker.ReminderBootReceiver"
+            android:name=".worker.LearningBootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
