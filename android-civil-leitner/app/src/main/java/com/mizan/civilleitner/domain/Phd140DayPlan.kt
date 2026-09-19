@@ -67,6 +67,46 @@ object PersianDate {
         }
         return Parts(jy, jm, jd)
     }
+
+    fun toGregorian(year: Int, month: Int, day: Int): LocalDate {
+        require(month in 1..12)
+        require(day in 1..31)
+        var jy = year + 1595
+        var days = -355668L + (365L * jy) + ((jy / 33) * 8L) + (((jy % 33) + 3) / 4)
+        days += day + if (month < 7) (month - 1) * 31L else ((month - 7) * 30L + 186L)
+
+        var gy = 400 * (days / 146097).toInt()
+        days %= 146097
+        if (days > 36524) {
+            gy += 100 * (--days / 36524).toInt()
+            days %= 36524
+            if (days >= 365) days++
+        }
+        gy += 4 * (days / 1461).toInt()
+        days %= 1461
+        if (days > 365) {
+            gy += ((days - 1) / 365).toInt()
+            days = (days - 1) % 365
+        }
+        var gd = days.toInt() + 1
+        val leap = (gy % 4 == 0 && gy % 100 != 0) || (gy % 400 == 0)
+        val monthDays = intArrayOf(31, if (leap) 29 else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        var gm = 1
+        while (gm <= 12 && gd > monthDays[gm - 1]) {
+            gd -= monthDays[gm - 1]
+            gm++
+        }
+        return LocalDate.of(gy, gm, gd)
+    }
+
+    fun parseToGregorian(value: String): LocalDate? {
+        val parts = value.trim().replace('-', '/').split('/')
+        if (parts.size != 3) return null
+        val y = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        val d = parts[2].toIntOrNull() ?: return null
+        return runCatching { toGregorian(y, m, d) }.getOrNull()
+    }
 }
 
 object Phd140DayPlan {
