@@ -227,14 +227,38 @@ interface PlanDao {
 }
 
 @Database(
-    entities = [ArticleEntity::class, StudyCardEntity::class, DailyProgressEntity::class],
-    version = 2,
+    entities = [
+        ArticleEntity::class,
+        StudyCardEntity::class,
+        DailyProgressEntity::class,
+        LegalDocumentEntity::class,
+        LegalArticleEntity::class,
+        VocabItemEntity::class,
+        ReminderEntity::class,
+        PlannerTaskEntity::class,
+        AppSettingEntity::class,
+        LocalEntitlementEntity::class,
+        InboxMessageEntity::class,
+        ClientCaseEntity::class,
+        CaseTimelineEntity::class,
+        StudySpeedEntity::class,
+    ],
+    version = 3,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun articleDao(): ArticleDao
     abstract fun studyCardDao(): StudyCardDao
     abstract fun planDao(): PlanDao
+    abstract fun legalContentDao(): LegalContentDao
+    abstract fun vocabDao(): VocabDao
+    abstract fun reminderDao(): ReminderDao
+    abstract fun plannerDao(): PlannerDao
+    abstract fun settingsDao(): SettingsDao
+    abstract fun entitlementDao(): EntitlementDao
+    abstract fun inboxDao(): InboxDao
+    abstract fun clientPortalDao(): ClientPortalDao
+    abstract fun studySpeedDao(): StudySpeedDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -283,12 +307,122 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""CREATE TABLE IF NOT EXISTS legal_documents (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    sourceUrl TEXT NOT NULL,
+                    verificationStatus TEXT NOT NULL,
+                    updatedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS legal_articles (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    documentId TEXT NOT NULL,
+                    articleNumber INTEGER NOT NULL,
+                    articleSuffix TEXT NOT NULL,
+                    officialText TEXT NOT NULL,
+                    noteText TEXT NOT NULL,
+                    legalStatus TEXT NOT NULL,
+                    sourceUrl TEXT NOT NULL,
+                    verificationStatus TEXT NOT NULL,
+                    importantKeywords TEXT NOT NULL,
+                    sortOrder INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS vocab_items (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    language TEXT NOT NULL,
+                    ordinal INTEGER NOT NULL,
+                    term TEXT NOT NULL,
+                    meaningFa TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    sourceName TEXT NOT NULL,
+                    sourceUrl TEXT NOT NULL,
+                    verificationStatus TEXT NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS reminders (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    contentType TEXT NOT NULL,
+                    contentId TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    scheduledAtMillis INTEGER NOT NULL,
+                    intervalCode TEXT NOT NULL,
+                    createdAtMillis INTEGER NOT NULL,
+                    lastTriggeredAtMillis INTEGER,
+                    reviewCount INTEGER NOT NULL,
+                    soundUri TEXT,
+                    vibrationEnabled INTEGER NOT NULL,
+                    notificationEnabled INTEGER NOT NULL,
+                    alarmEnabled INTEGER NOT NULL,
+                    status TEXT NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS planner_tasks (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    scheduledAtMillis INTEGER NOT NULL,
+                    remindAtMillis INTEGER,
+                    soundUri TEXT,
+                    alarmEnabled INTEGER NOT NULL,
+                    notificationEnabled INTEGER NOT NULL,
+                    completed INTEGER NOT NULL,
+                    recurrence TEXT NOT NULL,
+                    createdAtMillis INTEGER NOT NULL,
+                    updatedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT NOT NULL PRIMARY KEY,
+                    value TEXT NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS local_entitlements (
+                    scope TEXT NOT NULL PRIMARY KEY,
+                    planType TEXT NOT NULL,
+                    startsAtMillis INTEGER NOT NULL,
+                    endsAtMillis INTEGER,
+                    enabled INTEGER NOT NULL,
+                    lastSyncedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS inbox_messages (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    receivedAtMillis INTEGER NOT NULL,
+                    openedAtMillis INTEGER,
+                    source TEXT NOT NULL,
+                    deliveryState TEXT NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS client_cases (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    referenceNo TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    syncedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS case_timeline (
+                    id TEXT NOT NULL PRIMARY KEY,
+                    caseId TEXT NOT NULL,
+                    occurredAtMillis INTEGER NOT NULL,
+                    actionTitle TEXT NOT NULL,
+                    details TEXT NOT NULL,
+                    visibleToClient INTEGER NOT NULL,
+                    syncedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+                db.execSQL("""CREATE TABLE IF NOT EXISTS study_speed (
+                    contentType TEXT NOT NULL PRIMARY KEY,
+                    averageSeconds REAL NOT NULL,
+                    sampleCount INTEGER NOT NULL,
+                    updatedAtMillis INTEGER NOT NULL
+                )""".trimIndent())
+            }
+        }
+
         fun get(context: Context): AppDatabase = INSTANCE ?: synchronized(this) {
             INSTANCE ?: Room.databaseBuilder(
                 context.applicationContext,
                 AppDatabase::class.java,
                 "civil-law-leitner.db",
-            ).addMigrations(MIGRATION_1_2)
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { INSTANCE = it }
         }
