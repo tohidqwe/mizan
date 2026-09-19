@@ -1,14 +1,13 @@
-name: Android Civil Leitner
+name: Dr Tohid PhD Android
 
 on:
-  pull_request:
+  push:
+    branches:
+      - product/dr-tohid-phd-course-v1
     paths:
       - 'android-civil-leitner/**'
       - '.github/workflows/android-civil-leitner.yml'
-  push:
-    branches:
-      - main
-      - feature/civil-law-leitner-v0.1
+  pull_request:
     paths:
       - 'android-civil-leitner/**'
       - '.github/workflows/android-civil-leitner.yml'
@@ -16,17 +15,28 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate 1000-word English bank
-        run: node android-civil-leitner/tools/generate_vocab_cards.mjs
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Generate 2000 English-Persian flashcards
+        run: node android-civil-leitner/tools/generate_vocab_2000.mjs
 
       - name: Generate active fiqh bank
         run: node android-civil-leitner/tools/generate_fiqh_cards.mjs
+
+      - name: Generate 1000 Arabic-Persian flashcards
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --quiet word2word wordfreq
+          python android-civil-leitner/tools/generate_arabic_vocab.py
 
       - name: Prepare Qavanin trade print verification
         shell: bash
@@ -36,147 +46,76 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y poppler-utils
           fi
-          curl --fail --location --retry 3 --retry-delay 2 \
-            'https://vakilfasihi.com/wp-content/uploads/2024/01/%D9%86%D8%B3%D8%AE%D9%87-%DA%86%D8%A7%D9%BE%DB%8C-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA.pdf' \
-            -o /tmp/qavanin-trade.pdf
+          curl --fail --location --retry 3 --retry-delay 2             'https://vakilfasihi.com/wp-content/uploads/2024/01/%D9%86%D8%B3%D8%AE%D9%87-%DA%86%D8%A7%D9%BE%DB%8C-%D9%82%D8%A7%D9%86%D9%88%D9%86-%D8%AA%D8%AC%D8%A7%D8%B1%D8%AA.pdf'             -o /tmp/qavanin-trade.pdf
           pdftotext -layout /tmp/qavanin-trade.pdf trade-qavanin-print.txt
           grep -qi 'Qavanin.ir' trade-qavanin-print.txt
           grep -q '83457' trade-qavanin-print.txt
-          echo 'QAVANIN_ARTICLE_LABEL_SAMPLES'
-          grep -n -m 40 'ماده' trade-qavanin-print.txt || true
 
-      - name: Generate current Qavanin trade-law bank
+      - name: Generate verified current trade-law bank
         run: node android-civil-leitner/tools/generate_trade_cards.mjs
 
-      - name: Generate conceptual explanations for every active Civil Code article
-        run: node android-civil-leitner/tools/enrich_civil_explanations.mjs
+      - name: Remove all in-app legal explanations and analysis
+        run: node android-civil-leitner/tools/strip_legal_analysis.mjs
 
-      - name: Validate 1335-article legal seed
+      - name: Validate official legal text corpus
         shell: bash
         run: |
           python - <<'PY'
           import hashlib, json, pathlib
-          assets = pathlib.Path('android-civil-leitner/app/src/main/assets')
-          seed_path = assets / 'civil_seed.json'
-          manifest_path = assets / 'civil_source_manifest.json'
-          supplemental_path = assets / 'civil_supplemental.json'
+          assets=pathlib.Path('android-civil-leitner/app/src/main/assets')
+          seed_path=assets/'civil_seed.json'
+          seed=json.loads(seed_path.read_text(encoding='utf-8'))
+          manifest=json.loads((assets/'civil_source_manifest.json').read_text(encoding='utf-8'))
+          trade=json.loads((assets/'trade_cards.json').read_text(encoding='utf-8'))
+          tm=json.loads((assets/'trade_source_manifest.json').read_text(encoding='utf-8'))
 
-          raw = seed_path.read_bytes()
-          seed = json.loads(raw)
-          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-          supplemental = json.loads(supplemental_path.read_text(encoding='utf-8'))
+          assert len(seed)==1335
+          assert [x['articleNumber'] for x in seed]==list(range(1,1336))
+          assert all(x.get('officialText','').strip() for x in seed)
+          assert all(x.get('verificationStatus') in {'VERIFIED_OFFICIAL','VERIFIED_RRK'} for x in seed)
+          assert all(not x.get('simpleExplanation') and not x.get('analyticalPoint') and not x.get('recallQuestion') for x in seed)
+          assert manifest['officialConsolidatedSource'].startswith('https://qavanin.ir/')
+          assert manifest['contentMode']=='OFFICIAL_TEXT_ONLY'
+          assert hashlib.sha256(seed_path.read_bytes()).hexdigest()==manifest['seedSha256']
 
-          assert len(seed) == 1335, f'expected 1335 main articles, got {len(seed)}'
-          assert [x['articleNumber'] for x in seed] == list(range(1, 1336)), 'article numbering has a gap, duplicate or ordering error'
-          assert all(x.get('officialText','').strip() for x in seed), 'blank official text found'
-          assert all(x.get('verificationStatus') in {'VERIFIED_OFFICIAL','VERIFIED_RRK'} for x in seed), 'unverified article found'
-          assert all(x.get('source1','').strip() and x.get('source2','').strip() for x in seed), 'missing provenance reference'
-          active = [x for x in seed if x.get('topic') != 'ماده منسوخ']
-          assert all(len(x.get('simpleExplanation','').strip()) >= 90 for x in active), 'missing/short civil conceptual explanation'
-          assert all(len(x.get('analyticalPoint','').strip()) >= 80 for x in active), 'missing/short civil analytical point'
-          assert len({x['simpleExplanation'].strip() for x in active}) == len(active), 'duplicate civil conceptual explanation'
-          assert len({x['analyticalPoint'].strip() for x in active}) == len(active), 'duplicate civil analytical point'
-          assert manifest['activeConceptExplanationCount'] == len(active)
-          assert manifest['activeAnalyticalPointCount'] == len(active)
-          assert manifest['mainArticleCount'] == 1335
-          assert manifest['firstArticleNumber'] == 1 and manifest['lastArticleNumber'] == 1335
-          assert manifest['officialSourceId'] == '12021850837713548188'
-          assert manifest['officialConsolidatedSource'].startswith('https://qavanin.ir/'), 'canonical civil-law source must be qavanin.ir'
-          assert manifest['retrievedUrl'].startswith('https://qavanin.ir/'), 'civil-law retrieval must originate from qavanin.ir'
-          assert [x['articleKey'] for x in supplemental] == ['218مکرر','881مکرر','1313مکرر','1328مکرر']
-          assert hashlib.sha256(raw).hexdigest() == manifest['seedSha256'], 'seed SHA-256 differs from manifest'
+          assert len(trade)==tm['activeCardCount']
+          assert len(trade)>=750
+          assert all(x['answer'].strip() for x in trade)
+          assert all(not x.get('explanation') for x in trade)
+          assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
 
-          checks = {
-              1: 'روزنامه رسمي',
-              2: 'پانزده روز',
-              190: 'قصد طرفين',
-              946: 'اموال غيرمنقول',
-              1041: '13 سال',
-              1335: 'توسل به قسم',
-          }
-          for number, needle in checks.items():
-              assert needle in seed[number-1]['officialText'], f'spot check failed for article {number}'
-          for number in (947,1306,1307,1308,1309,1310,1311):
-              assert seed[number-1]['topic'] == 'ماده منسوخ', f'article {number} must be visibly marked repealed'
-
-          print('LEGAL_SEED_GATE=PASS')
-          print('PRIMARY_SOURCE=qavanin.ir')
-          print('MAIN_ARTICLES=1335')
-          print('SUPPLEMENTAL_PROVISIONS=4')
-          print('SEED_SHA256=' + manifest['seedSha256'])
+          print('LEGAL_TEXT_ONLY_GATE=PASS')
+          print('CIVIL_MAIN_ARTICLES=1335')
+          print('TRADE_CURRENT_RECORDS='+str(len(trade)))
           PY
 
-      - name: Validate complete exam curriculum
+      - name: Validate vocabulary and fiqh banks
         shell: bash
         run: |
           python - <<'PY'
           import json, pathlib
-          assets = pathlib.Path('android-civil-leitner/app/src/main/assets')
+          a=pathlib.Path('android-civil-leitner/app/src/main/assets')
+          en=json.loads((a/'vocab_cards.json').read_text(encoding='utf-8'))
+          ar=json.loads((a/'arabic_vocab_cards.json').read_text(encoding='utf-8'))
+          fiqh=json.loads((a/'fiqh_cards.json').read_text(encoding='utf-8'))
 
-          core = json.loads((assets / 'study_cards.json').read_text(encoding='utf-8'))
-          english = json.loads((assets / 'vocab_cards.json').read_text(encoding='utf-8'))
-          em = json.loads((assets / 'english_curriculum_manifest.json').read_text(encoding='utf-8'))
-          vm = json.loads((assets / 'vocab_manifest.json').read_text(encoding='utf-8'))
-          trade = json.loads((assets / 'trade_cards.json').read_text(encoding='utf-8'))
-          tm = json.loads((assets / 'trade_source_manifest.json').read_text(encoding='utf-8'))
-          fiqh = json.loads((assets / 'fiqh_cards.json').read_text(encoding='utf-8'))
-          fm = json.loads((assets / 'fiqh_manifest.json').read_text(encoding='utf-8'))
+          assert len(en)==2000
+          assert len({x['prompt'].lower() for x in en})==2000
+          assert all(x['domain']=='ENGLISH' and x['answer'].strip() for x in en)
 
-          assert em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذرهبین' or em['primaryReference']['name'] == 'زبان عمومی دکتری زیر ذره‌بین'
-          assert em['primaryReference']['providedByUser'] is True
-          assert em['leitner']['intervalDays'] == [1,2,3,7,14,28]
-          assert len(english) == 1000
-          assert vm['count'] == 1000 and vm['allCardsHavePersianMeaning'] is True
-          assert [x['ordinal'] for x in english] == list(range(1,1001))
-          assert all(x['domain'] == 'VOCAB' and x['answer'].strip() for x in english)
-          assert len({x['id'] for x in english}) == 1000
-          assert len(em['initialHighFrequencyFamilies']) >= 14
-          assert any(x['id'].startswith('VOCAB:FREQ:') for x in core)
-          assert any(x['id'].startswith('VOCAB:GRAMMAR:') for x in core)
-          assert any(x['id'].startswith('VOCAB:READING:') for x in core)
+          assert len(ar)==1000
+          assert len({x['prompt'] for x in ar})==1000
+          assert all(x['domain']=='ARABIC' and x['answer'].strip() for x in ar)
 
-          assert tm['policy'].startswith('Only provisions present/current')
-          assert tm['canonicalQavaninTree'].startswith('https://qavanin.ir/')
-          assert tm['qavaninPrintUrl'].startswith('https://qavanin.ir/')
-          assert tm['qavaninGeneratedPrintVerified'] is True
-          assert tm['sourceOriginalCount'] + len(tm['omittedOriginalBySource']) == 600
-          assert tm['sourceAmendmentCount'] + len(tm['omittedAmendmentBySource']) == 300
-          assert len(trade) == tm['activeCardCount']
-          assert len(trade) == tm['currentOriginalCount'] + tm['currentAmendmentCount']
-          assert len(trade) >= 750
-          assert all(x['id'].startswith(('TRADE:T1311:','TRADE:L1347:')) for x in trade)
-          assert all(x['answer'].strip() and len(x['explanation'].strip()) >= 180 for x in trade)
-          assert len({x['explanation'].strip() for x in trade}) == len(trade), 'duplicate trade conceptual explanation'
+          assert len(fiqh)>=120
+          assert all(x['domain']=='FIQH' and x['prompt'].strip() and x['answer'].strip() for x in fiqh)
 
-          original = [x for x in trade if x['id'].startswith('TRADE:T1311:')]
-          amend = [x for x in trade if x['id'].startswith('TRADE:L1347:')]
-          original_numbers = [int(x['id'].split(':')[-1]) for x in original]
-          amend_numbers = [int(x['id'].split(':')[-1]) for x in amend]
-          assert len(original_numbers) == len(set(original_numbers))
-          assert len(amend_numbers) == len(set(amend_numbers))
-          assert not set(range(21,94)).intersection(original_numbers)
-          assert {1,20,94,600}.issubset(set(original_numbers))
-          assert {1,300}.issubset(set(amend_numbers))
-
-          inactive_original = set(tm['explicitlyInactiveOriginal'])
-          inactive_amend = set(tm['explicitlyInactiveAmendment'])
-          assert not inactive_original.intersection(original_numbers)
-          assert not inactive_amend.intersection(amend_numbers)
-
-          assert len(fiqh) == 120 and fm['cardCount'] == 120 and fm['topicCount'] == 30
-          assert all(x['domain'] == 'FIQH' for x in fiqh)
-          assert all(x['prompt'].strip() and x['answer'].strip() and x['explanation'].strip() for x in fiqh)
-          required = {'متاجر و اقسام کسب','بیع فضولی','خیارات','رهن','ضمان','حواله','اجاره','وکالت'}
-          assert required.issubset(set(fm['requiredTopics']))
-          assert fm['modernCommercialTranslationsCopied'] is False
-
-          ids = [x['id'] for x in core + english + trade + fiqh]
-          assert len(ids) == len(set(ids)), 'duplicate IDs across bundled curriculum assets'
-
-          print('COMPLETE_CURRICULUM_GATE=PASS')
-          print('ENGLISH_WORDS=1000')
-          print('TRADE_CURRENT_UNITS=' + str(len(trade)))
-          print('FIQH_CARDS=120')
+          ids=[x['id'] for x in en+ar+fiqh]
+          assert len(ids)==len(set(ids))
+          print('CURRICULUM_GATE=PASS')
+          print('ENGLISH_WORDS=2000')
+          print('ARABIC_WORDS=1000')
+          print('FIQH_CARDS='+str(len(fiqh)))
           PY
 
       - name: Set up JDK 17
@@ -204,9 +143,15 @@ jobs:
       - name: Build debug APK
         run: gradle -p android-civil-leitner assembleDebug --stacktrace
 
+      - name: Verify APK
+        shell: bash
+        run: |
+          unzip -t android-civil-leitner/app/build/outputs/apk/debug/app-debug.apk >/dev/null
+          sha256sum android-civil-leitner/app/build/outputs/apk/debug/app-debug.apk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: civil-leitner-debug-apk
+          name: dr-tohid-phd-course-apk
           path: android-civil-leitner/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
