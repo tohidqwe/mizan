@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.MadaniMindGame" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#08120E</item>
+        <item name="android:navigationBarColor">#08120E</item>
+        <item name="android:colorAccent">#D2A64A</item>
+    </style>
+</resources>
