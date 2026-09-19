@@ -87,6 +87,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
@@ -100,6 +101,16 @@ private val FocusAmber = Color(0xFFF4B400)
 private val FocusBackground = Color(0xFFF5F7F6)
 private val LawTextBlack = Color(0xFF171717)
 private val SoftRed = Color(0xFFB3261E)
+
+data class LegalTextItem(
+    val id: String,
+    val collectionLabel: String,
+    val articleKey: String,
+    val articleNumber: Int,
+    val officialText: String,
+    val legalStatus: String,
+    val statusLabel: String = "",
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -129,8 +140,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val plannerTasks = plannerDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val soundUri = MutableStateFlow(prefs.getString("alarm_sound_uri", "") ?: "")
+    val civilSupplemental = MutableStateFlow<List<LegalTextItem>>(emptyList())
+    val tradeLibrary = MutableStateFlow<List<LegalTextItem>>(emptyList())
 
     init {
+        viewModelScope.launch {
+            civilSupplemental.value = loadCivilSupplemental()
+            tradeLibrary.value = loadTradeLibrary()
+        }
         viewModelScope.launch {
             while (isActive) {
                 clock.value = System.currentTimeMillis()
@@ -138,6 +155,48 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private fun loadCivilSupplemental(): List<LegalTextItem> = runCatching {
+        val raw = app.assets.open("civil_supplemental.json").bufferedReader().use { it.readText() }
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                add(
+                    LegalTextItem(
+                        id = "CIVIL:" + o.getString("articleKey"),
+                        collectionLabel = "قانون مدنی",
+                        articleKey = o.getString("articleKey"),
+                        articleNumber = o.getInt("articleNumber"),
+                        officialText = o.getString("officialText"),
+                        legalStatus = o.optString("legalStatus", "ACTIVE"),
+                        statusLabel = o.optString("legalStatus"),
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
+
+    private fun loadTradeLibrary(): List<LegalTextItem> = runCatching {
+        val raw = app.assets.open("trade_all_articles.json").bufferedReader().use { it.readText() }
+        val arr = JSONArray(raw)
+        buildList {
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                add(
+                    LegalTextItem(
+                        id = o.getString("id"),
+                        collectionLabel = o.getString("collectionLabel"),
+                        articleKey = o.getString("articleKey"),
+                        articleNumber = o.getInt("articleNumber"),
+                        officialText = o.getString("officialText"),
+                        legalStatus = o.getString("legalStatus"),
+                        statusLabel = o.optString("statusLabel"),
+                    )
+                )
+            }
+        }
+    }.getOrElse { emptyList() }
 
     fun setSound(uri: String) {
         soundUri.value = uri
@@ -434,10 +493,10 @@ private fun PlanLine(title: String, range: String, count: Int) {
 @Composable
 private fun LawsScreen(vm: MainViewModel) {
     val articles by vm.articles.collectAsStateWithLifecycle()
-    val cards by vm.cards.collectAsStateWithLifecycle()
+    val supplements by vm.civilSupplemental.collectAsStateWithLifecycle()
+    val tradeLibrary by vm.tradeLibrary.collectAsStateWithLifecycle()
     var law by remember { mutableStateOf("CIVIL") }
     var query by remember { mutableStateOf("") }
-    val trade = remember(cards) { cards.filter { it.domain == "TRADE" }.sortedBy { it.ordinal } }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -459,15 +518,22 @@ private fun LawsScreen(vm: MainViewModel) {
                 query.isBlank() || it.articleNumber.toString().contains(query.trim()) ||
                     it.officialText.contains(query.trim(), ignoreCase = true)
             }
+            val shownSupplements = supplements.filter {
+                query.isBlank() || it.articleKey.contains(query.trim()) ||
+                    it.officialText.contains(query.trim(), ignoreCase = true)
+            }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                items(shown, key = { it.articleNumber }) {
+                items(shown, key = { "main:" + it.articleNumber }) {
                     CivilLawCard(it,vm)
+                }
+                items(shownSupplements, key = { "supp:" + it.id }) {
+                    SupplementalLawCard(it,vm)
                 }
             }
         } else {
-            val shown = trade.filter {
-                query.isBlank() || it.title.contains(query.trim(),true) ||
-                    it.answer.contains(query.trim(),true) || it.id.contains(query.trim(),true)
+            val shown = tradeLibrary.filter {
+                query.isBlank() || it.collectionLabel.contains(query.trim(),true) ||
+                    it.officialText.contains(query.trim(),true) || it.articleKey.contains(query.trim(),true)
             }
             LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
                 items(shown, key = { it.id }) {
@@ -541,41 +607,78 @@ private fun CivilLawCard(article: ArticleEntity, vm: MainViewModel) {
 }
 
 @Composable
-private fun TradeLawCard(card: StudyCardEntity, vm: MainViewModel) {
+private fun SupplementalLawCard(item: LegalTextItem, vm: MainViewModel) {
     val context=LocalContext.current
     var reminder by remember { mutableStateOf(false) }
     var ai by remember { mutableStateOf(false) }
-    val parts=card.id.split(':')
-    val source=if(card.id.startsWith("TRADE:L1347:")) "لایحه اصلاحی ۱۳۴۷" else "قانون تجارت ۱۳۱۱"
-    val number=parts.lastOrNull() ?: card.ordinal.toString()
     Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Row {
                     Text("ماده ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                    Text(number, color = FocusBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(item.articleKey, color = FocusBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+                Row {
+                    TextButton(onClick = { reminder=true }) { Text("⏰ یادآوری") }
+                    TextButton(onClick = { ai=true }) { Text("↗ هوش مصنوعی") }
+                }
+            }
+            Text(highlightedLawText(item.officialText), color = LawTextBlack, lineHeight = 26.sp)
+            if(item.legalStatus != "ACTIVE") Text("وضعیت منبع: ${item.legalStatus}", color=SoftRed, fontSize=12.sp)
+        }
+    }
+    if(reminder) ReminderDialog(
+        title="ماده ${item.articleKey} قانون مدنی",
+        onDismiss={reminder=false},
+        onSelect={delay->
+            vm.scheduleReminder("CIVIL",item.id,"مرور ماده ${item.articleKey} قانون مدنی",item.officialText,delay)
+            reminder=false
+        }
+    )
+    if(ai) AiDialog(
+        onDismiss={ai=false},
+        onGemini={shareLawToAi(context,"com.google.android.apps.bard","ماده ${item.articleKey} قانون مدنی",item.officialText);ai=false},
+        onDeepSeek={shareLawToAi(context,"com.deepseek.chat","ماده ${item.articleKey} قانون مدنی",item.officialText);ai=false},
+    )
+}
+
+@Composable
+private fun TradeLawCard(item: LegalTextItem, vm: MainViewModel) {
+    val context=LocalContext.current
+    var reminder by remember { mutableStateOf(false) }
+    var ai by remember { mutableStateOf(false) }
+    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Row {
+                    Text("ماده ", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                    Text(item.articleKey, color = FocusBlue, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                 }
                 Row {
                     TextButton({reminder=true}) { Text("⏰ یادآوری") }
                     TextButton({ai=true}) { Text("↗ هوش مصنوعی") }
                 }
             }
-            Text(source, color = Color(0xFF687984), fontSize = 12.sp)
-            Text(highlightedLawText(card.answer), color = LawTextBlack, lineHeight = 26.sp)
+            Text(item.collectionLabel, color = Color(0xFF687984), fontSize = 12.sp)
+            Text(highlightedLawText(item.officialText), color = LawTextBlack, lineHeight = 26.sp)
+            when(item.legalStatus) {
+                "REPEALED" -> Text("وضعیت منبع: منسوخ/فاقد اعتبار",color=SoftRed,fontSize=12.sp)
+                "HISTORICAL_REPLACED_1347" -> Text("وضعیت منبع: متن تاریخی؛ بخش شرکت‌های سهامی با لایحه ۱۳۴۷ جایگزین شده است.",color=Color(0xFF8A5A00),fontSize=12.sp)
+            }
         }
     }
     if(reminder) ReminderDialog(
-        title="ماده $number — $source",
+        title="ماده ${item.articleKey} — ${item.collectionLabel}",
         onDismiss={reminder=false},
-        onSelect={ delay ->
-            vm.scheduleReminder("TRADE",card.id,"مرور ماده $number — $source",card.answer,delay)
+        onSelect={delay->
+            vm.scheduleReminder("TRADE",item.id,"مرور ماده ${item.articleKey} — ${item.collectionLabel}",item.officialText,delay)
             reminder=false
         }
     )
     if(ai) AiDialog(
         onDismiss={ai=false},
-        onGemini={ shareLawToAi(context,"com.google.android.apps.bard","ماده $number — $source",card.answer); ai=false },
-        onDeepSeek={ shareLawToAi(context,"com.deepseek.chat","ماده $number — $source",card.answer); ai=false },
+        onGemini={shareLawToAi(context,"com.google.android.apps.bard","ماده ${item.articleKey} — ${item.collectionLabel}",item.officialText);ai=false},
+        onDeepSeek={shareLawToAi(context,"com.deepseek.chat","ماده ${item.articleKey} — ${item.collectionLabel}",item.officialText);ai=false},
     )
 }
 
