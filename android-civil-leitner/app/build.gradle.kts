@@ -71,6 +71,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.8.5")
     ksp("androidx.room:room-compiler:2.8.5")
 
+    implementation("net.zetetic:sqlcipher-android:4.19.0@aar")
+    implementation("androidx.sqlite:sqlite:2.7.1")
+
     implementation("androidx.work:work-runtime-ktx:2.10.5")
     implementation("androidx.biometric:biometric:1.1.0")
 
