@@ -256,6 +256,10 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun selectClientCase(caseId: String?) {
+        selectedCaseId.value = caseId
+    }
+
     fun todayPersianLabel(): String = PersianDate.fromGregorian(LocalDate.now()).label()
     fun todayPersianNumeric(): String = PersianDate.fromGregorian(LocalDate.now()).numeric()
 
