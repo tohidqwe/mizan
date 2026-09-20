@@ -16,7 +16,7 @@ import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.mizan.civilleitner.MainActivity
+import com.mizan.civilleitner.product.ProductMainActivity
 import com.mizan.civilleitner.data.AppDatabase
 import com.mizan.civilleitner.data.ReminderEntity
 import kotlinx.coroutines.CoroutineScope
@@ -165,7 +165,7 @@ object ProductReminderNotification {
         }
         manager.createNotificationChannel(channel)
 
-        val open = Intent(context, MainActivity::class.java).apply {
+        val open = Intent(context, ProductMainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(ExactReminderScheduler.EXTRA_REMINDER_ID, item.id)
             putExtra(ExactReminderScheduler.EXTRA_CONTENT_TYPE, item.contentType)
