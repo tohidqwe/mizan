@@ -55,6 +55,14 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
     val inbox = db.inboxDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val clientCases = db.clientPortalDao().observeCases()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val selectedCaseId = MutableStateFlow<String?>(null)
+    val selectedCaseTimeline = selectedCaseId.flatMapLatest { id ->
+        if (id == null) flowOf(emptyList()) else db.clientPortalDao().observeTimeline(id)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val dueReminderCount = combine(reminders, nowMillis) { items, now ->
         items.count { it.scheduledAtMillis <= now && it.status == "ACTIVE" }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
