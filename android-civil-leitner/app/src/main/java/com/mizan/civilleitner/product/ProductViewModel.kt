@@ -128,6 +128,7 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
         time: String,
         reminderMinutesBefore: Int = 30,
         recurrence: String = "NONE",
+        soundUri: String? = null,
     ): Boolean {
         if (title.isBlank()) return false
         val date = PersianDate.parseToGregorian(persianDate) ?: return false
@@ -145,6 +146,7 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
                     description = description.trim(),
                     scheduledAtMillis = scheduledAt,
                     remindAtMillis = remindAt,
+                    soundUri = soundUri,
                     recurrence = recurrence,
                     createdAtMillis = now,
                     updatedAtMillis = now,
@@ -158,6 +160,7 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
                 scheduledAtMillis = remindAt,
                 intervalCode = "CUSTOM",
                 createdAtMillis = now,
+                soundUri = soundUri,
             )
             db.reminderDao().upsert(reminder)
             ExactReminderScheduler.schedule(app, reminder)
