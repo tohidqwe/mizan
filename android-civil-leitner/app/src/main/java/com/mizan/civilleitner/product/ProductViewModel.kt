@@ -97,6 +97,26 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
         isAdminBound.value = security.isAdminBound()
     }
 
+    fun provisionAdminDevice(baseUrl: String, activationCode: String) {
+        if (baseUrl.isBlank() || activationCode.isBlank()) {
+            adminProvisionStatus.value = "آدرس سرور و کد فعال‌سازی لازم است."
+            return
+        }
+        adminProvisionStatus.value = "در حال ثبت امن این دستگاه…"
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                AdminProvisioningClient.enroll(baseUrl.trim(), activationCode.trim())
+            }.onSuccess { result ->
+                security.adminApiBaseUrl = baseUrl.trim()
+                security.adminDeviceId = result.deviceId
+                isAdminBound.value = true
+                adminProvisionStatus.value = "دستگاه مدیر با موفقیت ثبت شد."
+            }.onFailure { error ->
+                adminProvisionStatus.value = error.message ?: "ثبت دستگاه ناموفق بود."
+            }
+        }
+    }
+
     fun activate72HourDemo() {
         if (demoStartedAt.value != null) return
         val start = System.currentTimeMillis()
