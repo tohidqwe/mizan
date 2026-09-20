@@ -10,13 +10,13 @@ import com.mizan.civilleitner.data.ReminderEntity
 import com.mizan.civilleitner.data.StudyCardEntity
 import com.mizan.civilleitner.domain.PersianDate
 import com.mizan.civilleitner.domain.ProductReviewPolicy
-import com.mizan.civilleitner.security.AppSecurityStore
+import com.mizan.civilleitner.security.AdminProvisioningClient\nimport com.mizan.civilleitner.security.AppSecurityStore
 import com.mizan.civilleitner.worker.ExactReminderScheduler
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers\nimport kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.combine
@@ -32,7 +32,7 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
     private val nowMillis = MutableStateFlow(System.currentTimeMillis())
     val demoStartedAt = MutableStateFlow<Long?>(null)
     val examEpochDay = MutableStateFlow<Long?>(null)
-    val isAdminBound = MutableStateFlow(security.isAdminBound())
+    val isAdminBound = MutableStateFlow(security.isAdminBound())\n    val adminProvisionStatus = MutableStateFlow(\"\")
 
     val articles = db.articleDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
