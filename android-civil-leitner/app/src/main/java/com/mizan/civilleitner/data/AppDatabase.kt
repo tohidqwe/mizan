@@ -394,23 +394,6 @@ abstract class AppDatabase : RoomDatabase() {
                     source TEXT NOT NULL,
                     deliveryState TEXT NOT NULL
                 )""".trimIndent())
-                db.execSQL("""CREATE TABLE IF NOT EXISTS client_cases (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    referenceNo TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    syncedAtMillis INTEGER NOT NULL
-                )""".trimIndent())
-                db.execSQL("""CREATE TABLE IF NOT EXISTS case_timeline (
-                    id TEXT NOT NULL PRIMARY KEY,
-                    caseId TEXT NOT NULL,
-                    occurredAtMillis INTEGER NOT NULL,
-                    actionTitle TEXT NOT NULL,
-                    details TEXT NOT NULL,
-                    visibleToClient INTEGER NOT NULL,
-                    syncedAtMillis INTEGER NOT NULL
-                )""".trimIndent())
                 db.execSQL("""CREATE TABLE IF NOT EXISTS study_speed (
                     contentType TEXT NOT NULL PRIMARY KEY,
                     averageSeconds REAL NOT NULL,
