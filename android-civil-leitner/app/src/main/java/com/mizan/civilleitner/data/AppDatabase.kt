@@ -123,6 +123,9 @@ interface ArticleDao {
     @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' ORDER BY articleNumber")
     fun observeAll(): Flow<List<ArticleEntity>>
 
+    @Query("SELECT * FROM articles ORDER BY articleNumber")
+    fun observeAllIncludingRepealed(): Flow<List<ArticleEntity>>
+
     @Query("SELECT * FROM articles WHERE topic != 'ماده منسوخ' AND reviewEnabled = 1 AND explicitMastered = 0 AND nextReviewEpochDay <= :today ORDER BY nextReviewEpochDay ASC, articleNumber ASC")
     fun observeDue(today: Long): Flow<List<ArticleEntity>>
 
