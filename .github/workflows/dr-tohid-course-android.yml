@@ -45,6 +45,9 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
           echo "Using Android SDK at $ANDROID_HOME"
 
+      - name: Generate verified 2000-word English bank
+        run: node tools/generate_vocab_cards.mjs
+
       - name: Unit tests
         run: gradle --no-daemon testDebugUnitTest --stacktrace
 
