@@ -37,6 +37,9 @@ class ProductViewModel(application: Application) : AndroidViewModel(application)
     val articles = db.articleDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val allArticles = db.articleDao().observeAllIncludingRepealed()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val cards = db.studyCardDao().observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
