@@ -30,6 +30,18 @@ jobs:
           test -f mobile/app/build.gradle.kts
           grep -q 'com.aifactory.mobile.v2' mobile/app/build.gradle.kts
 
+      - name: Pack reconstructed source for diagnostics
+        shell: bash
+        run: tar -cJf /tmp/AI-Android-Factory-v2-source.tar.xz -C mobile .
+
+      - name: Upload reconstructed source
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Android-Factory-v2-source
+          path: /tmp/AI-Android-Factory-v2-source.tar.xz
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
