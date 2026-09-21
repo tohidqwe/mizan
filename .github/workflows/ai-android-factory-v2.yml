@@ -22,9 +22,8 @@ jobs:
           TITLE: ${{ github.event.issue.title }}
         run: |
           set -euo pipefail
-          if [[ "$TITLE" =~ ^\\[AIF-V2:([a-f0-9-]{36})\\] ]]; then
-            REQ_ID="${BASH_REMATCH[1]}"
-          else
+          REQ_ID="${TITLE:8:36}"
+          if [[ ! "$REQ_ID" =~ ^[0-9a-f-]{36}$ ]]; then
             echo "Invalid request title" >&2
             exit 2
           fi
