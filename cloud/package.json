@@ -1,0 +1,9 @@
+{
+  "name":"ai-android-factory-cloud-free",
+  "version":"1.0.0",
+  "private":true,
+  "type":"module",
+  "engines":{"node":">=24"},
+  "scripts":{"start":"node server.mjs"},
+  "dependencies":{"adm-zip":"^0.5.16","cors":"^2.8.5","express":"^5.1.0","multer":"^2.0.2"}
+}
