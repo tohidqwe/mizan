@@ -73,6 +73,8 @@ jobs:
       - name: Generate prompt-specific Android project
         env:
           AIF_OUT: generated-app
+          COPILOT_GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: python .aifactory/generate.py
 
       - name: Set up JDK 17
