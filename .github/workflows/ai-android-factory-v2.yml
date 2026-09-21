@@ -81,11 +81,20 @@ jobs:
         run: gh release edit "$TAG" --notes $'AIF_STATUS=planning\nAIF_MESSAGE=در حال تحلیل دقیق Prompt و طراحی معماری برنامه'
 
       - name: Generate prompt-specific Android project
+        shell: bash
         env:
           AIF_OUT: generated-app
           COPILOT_GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: python .aifactory/generate.py
+        run: |
+          set +e
+          python .aifactory/generate.py 2>&1 | tee /tmp/aif-generate.log
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -ne 0 ]; then
+            tail -n 12 /tmp/aif-generate.log > /tmp/aif-failure.txt || true
+            exit "$code"
+          fi
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -183,6 +192,9 @@ jobs:
           TAG: ${{ steps.req.outputs.tag }}
           ISSUE: ${{ github.event.issue.number }}
         run: |
-          gh release edit "$TAG" --notes $'AIF_STATUS=failed\nAIF_MESSAGE=ساخت متوقف شد؛ موتور از تحویل اپ نامرتبط یا ناقص خودداری کرد.' || true
-          gh issue comment "$ISSUE" --body "Build متوقف شد. برای جلوگیری از تحویل اپ بی‌ربط، Gate کیفیت اجازه انتشار APK نداد." || true
+          DETAIL="$(tail -n 4 /tmp/aif-failure.txt 2>/dev/null | tr '\n' ' ' | sed 's/[[:cntrl:]]//g' | cut -c1-700)"
+          [ -n "$DETAIL" ] || DETAIL="ساخت متوقف شد؛ جزئیات فنی ثبت نشد."
+          gh release edit "$TAG" --notes "AIF_STATUS=failed
+          AIF_MESSAGE=$DETAIL" || true
+          gh issue comment "$ISSUE" --body "Build متوقف شد. علت: $DETAIL" || true
           gh issue close "$ISSUE" --reason not_planned || true
