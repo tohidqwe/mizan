@@ -59,7 +59,7 @@ def parse_request():
     if mode not in ("prompt","url"): die("unsupported mode")
     if mode == "prompt" and len(prompt.strip()) < 8: die("prompt too short")
     if mode == "url" and not re.match(r"^https://", url, re.I): die("URL mode requires HTTPS")
-    if len(prompt) > 6000: die("prompt too long")
+    if len(prompt) > 50000: die("prompt too long: maximum 50000 characters")
     return {"id":rid, "actor":actor, "app_name":app[:80], "package":package, "mode":mode, "prompt":prompt, "url":url}
 
 def ai(messages, model="copilot", temperature=0.35, max_tokens=7000):
