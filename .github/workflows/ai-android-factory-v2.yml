@@ -53,7 +53,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
           REQ_ID: ${{ steps.req.outputs.id }}
-        run: gh issue edit "$ISSUE" --body "AI Android Factory request accepted. Request ID: $REQ_ID. Prompt payload was removed after ingestion."
+        run: |
+          gh issue edit "$ISSUE" --body "AI Android Factory request accepted. Request ID: $REQ_ID. Prompt payload was removed after ingestion."
 
       - name: Checkout generator
         uses: actions/checkout@v4
