@@ -10,7 +10,7 @@ import { ACCESS_TOKEN,MAX_UPLOAD_MB,SIGNING_ALIAS,SIGNING_PASS,projects,now,publ
 const PORT=Number(process.env.PORT||8080);
 const app=express();
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_UPLOAD_MB*1024*1024,files:1}});
-const queue=[];let busy=false;
+const queue=[];let busy=false;\nconst buildRate=new Map();
 
 app.disable("x-powered-by");app.set("trust proxy",1);app.use(cors());app.use(express.json({limit:"1mb"}));
 app.use((req,res,next)=>{res.setHeader("X-Content-Type-Options","nosniff");res.setHeader("X-Frame-Options","DENY");res.setHeader("Referrer-Policy","no-referrer");if(ACCESS_TOKEN&&req.path!=="/api/health"){const t=(req.headers.authorization||"").replace(/^Bearer\s+/i,"");if(t!==ACCESS_TOKEN)return res.status(401).json({error:"Unauthorized"})}next()});
@@ -42,10 +42,10 @@ app.post("/api/projects",upload.single("webzip"),async(req,res,next)=>{try{
  if(mode==="prompt"&&!String(req.body.prompt||"").trim())throw new Error("Prompt لازم است.");
  if(mode==="url"&&!/^https?:\/\//i.test(String(req.body.url||"")))throw new Error("URL نامعتبر است.");
  if(mode==="webzip"&&!req.file)throw new Error("ZIP لازم است.");
- const id=crypto.randomUUID(),p={id,createdAt:now(),updatedAt:now(),status:"created",progress:2,spec:{appName,packageName:pkg,mode,prompt:mode==="prompt"?String(req.body.prompt||""):undefined,url:mode==="url"?String(req.body.url||""):undefined,autoBuild:String(req.body.autoBuild??"true")!=="false"},artifact:null,artifactSha256:null,error:null,attempts:0,_zipBuffer:req.file?.buffer||null};
+ const id=crypto.randomUUID(),p={id,ownerClientId:req.clientId,createdAt:now(),updatedAt:now(),status:"created",progress:2,spec:{appName,packageName:pkg,mode,prompt:mode==="prompt"?String(req.body.prompt||""):undefined,url:mode==="url"?String(req.body.url||""):undefined,autoBuild:String(req.body.autoBuild??"true")!=="false"},artifact:null,artifactSha256:null,error:null,attempts:0,_zipBuffer:req.file?.buffer||null};
  projects.set(id,p);await persist(p);await appendLog(id,"[project] Created "+pkg);if(p.spec.autoBuild)enqueue(id);res.status(201).json(publicProject(p));
  }catch(e){next(e)}});
-app.post("/api/projects/:id/run",async(req,res)=>{const p=projects.get(req.params.id);if(!p)return res.status(404).json({error:"Not found"});p.status="created";p.progress=2;p.error=null;await persist(p);enqueue(p.id);res.status(202).json({ok:true})});
+app.post("/api/projects/:id/run",allowBuild,async(req,res)=>{const p=owned(req,req.params.id);if(!p)return res.status(404).json({error:"Not found"});p.status="created";p.progress=2;p.error=null;await persist(p);enqueue(p.id);res.status(202).json({ok:true})});
 app.use((err,_req,res,_next)=>{console.error(err);res.status(err?.code==="LIMIT_FILE_SIZE"?413:400).json({error:err?.message||"Request failed"})});
 
 await loadExisting();await ensureSigningKey();
