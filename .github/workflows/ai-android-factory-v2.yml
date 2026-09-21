@@ -1,0 +1,164 @@
+name: AI Android Factory v2
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  build:
+    if: \${{ github.actor == github.repository_owner && startsWith(github.event.issue.title, '[AIF-V2:') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Resolve request id
+        id: req
+        shell: bash
+        env:
+          TITLE: \${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+          if [[ "$TITLE" =~ ^\\[AIF-V2:([a-f0-9-]{36})\\] ]]; then
+            REQ_ID="\${BASH_REMATCH[1]}"
+          else
+            echo "Invalid request title" >&2
+            exit 2
+          fi
+          echo "id=$REQ_ID" >> "$GITHUB_OUTPUT"
+          echo "tag=aif-$REQ_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Create public build status
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          TAG: \${{ steps.req.outputs.tag }}
+          REQ_ID: \${{ steps.req.outputs.id }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "AI Android Factory · $REQ_ID" --notes $'AIF_STATUS=queued\nAIF_MESSAGE=درخواست دریافت شد'
+          else
+            gh release create "$TAG" --title "AI Android Factory · $REQ_ID" --notes $'AIF_STATUS=queued\nAIF_MESSAGE=درخواست دریافت شد'
+          fi
+
+      - name: Checkout generator
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install generator dependency
+        run: python -m pip install --disable-pip-version-check requests==2.32.5
+
+      - name: Mark planning
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          TAG: \${{ steps.req.outputs.tag }}
+        run: gh release edit "$TAG" --notes $'AIF_STATUS=planning\nAIF_MESSAGE=در حال تحلیل دقیق Prompt و طراحی معماری برنامه'
+
+      - name: Generate prompt-specific Android project
+        env:
+          AIF_OUT: generated-app
+        run: python .aifactory/generate.py
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android API 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Create one-time signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 20)"
+          KEYSTORE="$RUNNER_TEMP/aif-generated-release.jks"
+          keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS" -alias aif -keyalg RSA -keysize 3072 -validity 3650 -dname "CN=AI Android Factory Generated App"
+          echo "SIGNING_STORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "SIGNING_STORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          echo "SIGNING_KEY_ALIAS=aif" >> "$GITHUB_ENV"
+
+      - name: Mark compiling
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          TAG: \${{ steps.req.outputs.tag }}
+        run: gh release edit "$TAG" --notes $'AIF_STATUS=building\nAIF_MESSAGE=معماری تأیید شد؛ در حال کامپایل APK'
+
+      - name: Build release APK
+        run: gradle -p generated-app :app:assembleRelease --no-daemon --stacktrace --max-workers=1
+
+      - name: Verify and package
+        id: package
+        shell: bash
+        env:
+          REQ_ID: \${{ steps.req.outputs.id }}
+        run: |
+          set -euo pipefail
+          APK="generated-app/app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          apksigner verify --verbose --print-certs "$APK" > APKSIGNER-VERIFY.txt
+          OUT="AI-Generated-$REQ_ID.apk"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" | tee "$OUT.sha256"
+          echo "apk=$OUT" >> "$GITHUB_OUTPUT"
+
+      - name: Publish APK
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          TAG: \${{ steps.req.outputs.tag }}
+          APK: \${{ steps.package.outputs.apk }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" "$APK" "$APK.sha256" aif-manifest.json APKSIGNER-VERIFY.txt --clobber
+          SHA="$(cut -d' ' -f1 "$APK.sha256")"
+          gh release edit "$TAG" --notes "AIF_STATUS=succeeded
+          AIF_MESSAGE=APK با موفقیت ساخته و امضا شد
+          AIF_SHA256=$SHA"
+
+      - name: Comment success
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          ISSUE: \${{ github.event.issue.number }}
+          TAG: \${{ steps.req.outputs.tag }}
+        run: gh issue comment "$ISSUE" --body "Build موفق بود. خروجی در Release با تگ $TAG آماده است."
+
+      - name: Publish failure status
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+          TAG: \${{ steps.req.outputs.tag }}
+          ISSUE: \${{ github.event.issue.number }}
+        run: |
+          gh release edit "$TAG" --notes $'AIF_STATUS=failed\nAIF_MESSAGE=ساخت متوقف شد؛ موتور از تحویل اپ نامرتبط یا ناقص خودداری کرد.' || true
+          gh issue comment "$ISSUE" --body "Build متوقف شد. برای جلوگیری از تحویل اپ بی‌ربط، Gate کیفیت اجازه انتشار APK نداد." || true
