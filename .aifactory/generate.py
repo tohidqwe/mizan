@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-import base64, html, json, os, re, sys, time
+import base64, html, json, os, re, subprocess, sys, time
 from pathlib import Path
-import requests
 
 EVENT = Path(os.environ.get("GITHUB_EVENT_PATH", ""))
 OUT = Path(os.environ.get("AIF_OUT", "generated-app"))
-API = "https://text.pollinations.ai/openai"
 
 def die(msg):
     print("AIF ERROR:", msg, file=sys.stderr)
@@ -45,22 +43,32 @@ def parse_request():
     if len(prompt) > 6000: die("prompt too long")
     return {"id":rid, "actor":actor, "app_name":app[:80], "package":package, "mode":mode, "prompt":prompt, "url":url}
 
-def ai(messages, model="openai", temperature=0.35, max_tokens=7000):
-    payload = {"model":model,"messages":messages,"temperature":temperature,"max_tokens":max_tokens,"private":True}
+def ai(messages, model="copilot", temperature=0.35, max_tokens=7000):
+    combined = []
+    for m in messages:
+        role = str(m.get("role","user")).upper()
+        combined.append(role + ":\n" + str(m.get("content","")))
+    prompt = "\n\n".join(combined)
+    prompt += "\n\nReturn only the requested artifact. Do not add commentary."
     last = None
-    for attempt in range(4):
+    for attempt in range(2):
         try:
-            r = requests.post(API, json=payload, timeout=150)
-            r.raise_for_status()
-            data = r.json()
-            text = data.get("choices",[{}])[0].get("message",{}).get("content","")
-            if text and len(text) > 40:
-                return text.strip()
-            last = RuntimeError("empty AI response")
+            p = subprocess.run(
+                ["copilot", "-p", prompt, "-s", "--no-ask-user"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=240,
+                env=os.environ.copy(),
+            )
+            out = re.sub(r"\x1b\[[0-9;]*m", "", p.stdout or "").strip()
+            if p.returncode == 0 and len(out) > 40:
+                return out
+            last = RuntimeError((p.stderr or out or ("copilot exit " + str(p.returncode)))[:1200])
         except Exception as e:
             last = e
-        time.sleep(3 + attempt * 3)
-    raise RuntimeError(f"AI generation unavailable after retries: {last}")
+        time.sleep(4 + attempt * 4)
+    raise RuntimeError(f"GitHub Copilot generation unavailable after retries: {last}")
 
 def strip_fence(s):
     s = s.strip()
