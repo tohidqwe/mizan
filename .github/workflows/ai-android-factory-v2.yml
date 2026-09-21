@@ -46,6 +46,15 @@ jobs:
             gh release create "$TAG" --title "AI Android Factory · $REQ_ID" --notes $'AIF_STATUS=queued\nAIF_MESSAGE=درخواست دریافت شد'
           fi
 
+      - name: Redact submitted prompt from public issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE: ${{ github.event.issue.number }}
+          REQ_ID: ${{ steps.req.outputs.id }}
+        run: gh issue edit "$ISSUE" --body "AI Android Factory request accepted. Request ID: $REQ_ID. Prompt payload was removed after ingestion."
+
       - name: Checkout generator
         uses: actions/checkout@v4
 
@@ -160,7 +169,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE: ${{ github.event.issue.number }}
           TAG: ${{ steps.req.outputs.tag }}
-        run: gh issue comment "$ISSUE" --body "Build موفق بود. خروجی در Release با تگ $TAG آماده است."
+        run: |
+          gh issue comment "$ISSUE" --body "Build موفق بود. خروجی در Release با تگ $TAG آماده است."
+          gh issue close "$ISSUE" --reason completed
 
       - name: Publish failure status
         if: failure()
@@ -173,3 +184,4 @@ jobs:
         run: |
           gh release edit "$TAG" --notes $'AIF_STATUS=failed\nAIF_MESSAGE=ساخت متوقف شد؛ موتور از تحویل اپ نامرتبط یا ناقص خودداری کرد.' || true
           gh issue comment "$ISSUE" --body "Build متوقف شد. برای جلوگیری از تحویل اپ بی‌ربط، Gate کیفیت اجازه انتشار APK نداد." || true
+          gh issue close "$ISSUE" --reason not_planned || true
