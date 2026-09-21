@@ -25,7 +25,7 @@ export function safePackage(input,appName="app"){
 }
 export function publicProject(p){return{id:p.id,createdAt:p.createdAt,updatedAt:p.updatedAt,status:p.status,progress:p.progress,spec:p.spec,artifact:p.artifact||null,artifactSha256:p.artifactSha256||null,error:p.error||null,attempts:p.attempts||0}}
 export async function appendLog(id,line){await fs.mkdir(projectDir(id),{recursive:true});await fs.appendFile(logFile(id),"["+new Date().toLocaleTimeString("en-GB")+"] "+String(line).slice(0,5000)+"\n","utf8")}
-export async function persist(p){p.updatedAt=now();projects.set(p.id,p);await fs.mkdir(projectDir(p.id),{recursive:true});await fs.writeFile(path.join(projectDir(p.id),"project.json"),JSON.stringify(publicProject(p),null,2))}
+export async function persist(p){p.updatedAt=now();projects.set(p.id,p);await fs.mkdir(projectDir(p.id),{recursive:true});const stored={...publicProject(p),ownerClientId:p.ownerClientId||null};await fs.writeFile(path.join(projectDir(p.id),"project.json"),JSON.stringify(stored,null,2))}
 export async function loadExisting(){await fs.mkdir(path.join(DATA_DIR,"projects"),{recursive:true});const ds=await fs.readdir(path.join(DATA_DIR,"projects"),{withFileTypes:true}).catch(()=>[]);for(const d of ds){if(!d.isDirectory())continue;try{const p=JSON.parse(await fs.readFile(path.join(DATA_DIR,"projects",d.name,"project.json"),"utf8"));projects.set(p.id,p)}catch{}}}
 export async function ensureSigningKey(){
   const dir=path.join(DATA_DIR,"private");await fs.mkdir(dir,{recursive:true});signingFile=path.join(dir,"factory-release.jks");
