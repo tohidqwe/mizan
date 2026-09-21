@@ -9,7 +9,7 @@ RUN sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0" && r
 WORKDIR /app
 COPY cloud/package.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund
-COPY cloud/server.mjs ./server.mjs
+COPY cloud/*.mjs ./
 ENV NODE_ENV=production PORT=8080 DATA_DIR=/tmp/aifactory
 EXPOSE 8080
 CMD ["node","server.mjs"]
