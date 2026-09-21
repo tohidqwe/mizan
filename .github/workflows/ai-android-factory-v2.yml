@@ -130,7 +130,9 @@ jobs:
           set -euo pipefail
           APK="generated-app/app/build/outputs/apk/release/app-release.apk"
           test -s "$APK"
-          apksigner verify --verbose --print-certs "$APK" > APKSIGNER-VERIFY.txt
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" > APKSIGNER-VERIFY.txt
           OUT="AI-Generated-$REQ_ID.apk"
           cp "$APK" "$OUT"
           sha256sum "$OUT" | tee "$OUT.sha256"
