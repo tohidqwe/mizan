@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import base64, html, json, os, re, subprocess, sys, time
+import base64, gzip, html, json, os, re, subprocess, sys, time
 from pathlib import Path
 
 EVENT = Path(os.environ.get("GITHUB_EVENT_PATH", ""))
@@ -20,21 +20,40 @@ def parse_request():
     issue = ev["issue"]
     title = issue.get("title","")
     actor = ev.get("sender",{}).get("login","")
-    m = re.match(r"^\[AIF-V2:([a-f0-9-]{36})\]\s*(.*)$", title, re.I)
+    m = re.match(r"^\[AIF-V2:([a-f0-9-]{36})\](?:\s+.*)?$", title, re.I)
     if not m: die("invalid issue title")
     fields = {}
     for line in (issue.get("body") or "").splitlines():
         if "=" in line:
             k,v = line.split("=",1)
             fields[k.strip()] = v.strip()
-    if fields.get("protocol") != "AIF_REQUEST_V2": die("unsupported protocol")
-    rid = fields.get("request_id","")
+
+    protocol = fields.get("protocol")
+    if protocol == "AIF_REQUEST_V3":
+        token = fields.get("payload_gz_b64url","")
+        try:
+            padded = token + "=" * (-len(token) % 4)
+            raw = base64.urlsafe_b64decode(padded.encode())
+            payload = json.loads(gzip.decompress(raw).decode("utf-8"))
+        except Exception as e:
+            die(f"invalid compressed payload: {e}")
+        rid = str(payload.get("id",""))
+        app = str(payload.get("app_name",""))
+        package = str(payload.get("package_name","")).strip().lower()
+        mode = str(payload.get("mode","prompt"))
+        prompt = str(payload.get("prompt",""))
+        url = str(payload.get("url",""))
+    elif protocol == "AIF_REQUEST_V2":
+        rid = fields.get("request_id","")
+        app = b64d(fields.get("app_name_b64",""))
+        prompt = b64d(fields.get("prompt_b64","")) if fields.get("prompt_b64") else ""
+        url = b64d(fields.get("url_b64","")) if fields.get("url_b64") else ""
+        mode = fields.get("mode","prompt")
+        package = fields.get("package_name","").strip().lower()
+    else:
+        die("unsupported protocol")
+
     if rid.lower() != m.group(1).lower(): die("request id mismatch")
-    app = b64d(fields.get("app_name_b64",""))
-    prompt = b64d(fields.get("prompt_b64","")) if fields.get("prompt_b64") else ""
-    url = b64d(fields.get("url_b64","")) if fields.get("url_b64") else ""
-    mode = fields.get("mode","prompt")
-    package = fields.get("package_name","").strip().lower()
     if not re.match(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$", package):
         die("invalid package name")
     if mode not in ("prompt","url"): die("unsupported mode")
