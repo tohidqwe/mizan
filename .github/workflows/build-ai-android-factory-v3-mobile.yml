@@ -28,6 +28,40 @@ jobs:
           mkdir -p mobile
           tar -xJf /tmp/aif-v3.tar.xz -C mobile --strip-components=1
           sed -i '/foundation.layout.weight/d' mobile/app/src/main/java/com/aifactory/mobile/ui/FactoryApp.kt
+
+          # Fix FileProvider roots used by the generated APK installer.
+          mkdir -p mobile/app/src/main/res/xml
+          found_paths=0
+          for p in mobile/app/src/main/res/xml/*.xml; do
+            [ -f "$p" ] || continue
+            if grep -q '<paths' "$p"; then
+              cat > "$p" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="generated_apks" path="generated-apks/" />
+    <cache-path name="cache_root" path="." />
+    <external-cache-path name="external_cache_root" path="." />
+    <files-path name="files_root" path="." />
+</paths>
+EOF
+              found_paths=1
+            fi
+          done
+          if [ "$found_paths" -eq 0 ]; then
+            cat > mobile/app/src/main/res/xml/file_paths.xml <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <cache-path name="generated_apks" path="generated-apks/" />
+    <cache-path name="cache_root" path="." />
+    <external-cache-path name="external_cache_root" path="." />
+    <files-path name="files_root" path="." />
+</paths>
+EOF
+          fi
+
+          # Bump mobile patch version so the fixed build is easy to identify.
+          sed -i 's/versionName = "3.1.0"/versionName = "3.1.1"/g; s/versionCode = 31/versionCode = 32/g' mobile/app/build.gradle.kts || true
+
           test -f mobile/app/build.gradle.kts
           test -f mobile/app/src/main/java/com/aifactory/mobile/ui/LiveVoiceDialog.kt
           test -f mobile/app/src/main/java/com/aifactory/mobile/data/AssistantRepository.kt
@@ -82,16 +116,16 @@ jobs:
           test -s "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee artifact/APKSIGNER-VERIFY.txt
-          cp "$APK" artifact/AI-Android-Factory-v3.1.0-Live-Voice.apk
+          cp "$APK" artifact/AI-Android-Factory-v3.1.1-Live-Voice.apk
           cd artifact
-          sha256sum AI-Android-Factory-v3.1.0-Live-Voice.apk > AI-Android-Factory-v3.1.0-Live-Voice.apk.sha256
-          unzip -t AI-Android-Factory-v3.1.0-Live-Voice.apk >/dev/null
+          sha256sum AI-Android-Factory-v3.1.1-Live-Voice.apk > AI-Android-Factory-v3.1.1-Live-Voice.apk.sha256
+          unzip -t AI-Android-Factory-v3.1.1-Live-Voice.apk >/dev/null
           ls -lh
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Android-Factory-v3.1.0-Live-Voice
+          name: AI-Android-Factory-v3.1.1-Live-Voice
           path: artifact/
           if-no-files-found: error
           retention-days: 7
