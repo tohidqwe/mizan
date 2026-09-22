@@ -1,0 +1,96 @@
+name: Build AI Android Factory v3 Mobile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.aifactory/mobile-v3/**'
+      - '.github/workflows/build-ai-android-factory-v3-mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct mobile source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .aifactory/mobile-v3/source.tar.xz.b64 > /tmp/aif-v3.tar.xz
+          echo "64e17dc1fbeae9d38e52b830aab355ff07cd69e7ffea9ab562bee46c3b6fff85  /tmp/aif-v3.tar.xz" | sha256sum -c -
+          mkdir -p mobile
+          tar -xJf /tmp/aif-v3.tar.xz -C mobile --strip-components=1
+          test -f mobile/app/build.gradle.kts
+          test -f mobile/app/src/main/java/com/aifactory/mobile/ui/LiveVoiceDialog.kt
+          test -f mobile/app/src/main/java/com/aifactory/mobile/data/AssistantRepository.kt
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          set +o pipefail
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          set -o pipefail
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Generate signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          PASS="$(openssl rand -hex 24)"
+          KEYSTORE="$RUNNER_TEMP/aif-v3-mobile.jks"
+          keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storepass "$PASS" -keypass "$PASS"             -alias factory-mobile-v3 -keyalg RSA -keysize 3072 -validity 10000             -dname "CN=AI Android Factory v3, O=AI Android Factory"
+          echo "FACTORY_STORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
+          echo "FACTORY_STORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+          echo "FACTORY_KEY_ALIAS=factory-mobile-v3" >> "$GITHUB_ENV"
+          echo "FACTORY_KEY_PASSWORD=$PASS" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        working-directory: mobile
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle :app:assembleRelease --stacktrace --no-daemon --max-workers=2
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          APK="$(find mobile/app/build/outputs/apk/release -type f -name '*.apk' | head -n1)"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee artifact/APKSIGNER-VERIFY.txt
+          cp "$APK" artifact/AI-Android-Factory-v3.0.0-Live-Voice.apk
+          cd artifact
+          sha256sum AI-Android-Factory-v3.0.0-Live-Voice.apk > AI-Android-Factory-v3.0.0-Live-Voice.apk.sha256
+          unzip -t AI-Android-Factory-v3.0.0-Live-Voice.apk >/dev/null
+          ls -lh
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Android-Factory-v3.0.0-Live-Voice
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 7
