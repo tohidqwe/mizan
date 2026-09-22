@@ -23,8 +23,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .aifactory/mobile-v3/source.tar.xz.b64 > /tmp/aif-v3.tar.xz
-          echo "64e17dc1fbeae9d38e52b830aab355ff07cd69e7ffea9ab562bee46c3b6fff85  /tmp/aif-v3.tar.xz" | sha256sum -c -
+          cat .aifactory/mobile-v3/source.part01 .aifactory/mobile-v3/source.part02 .aifactory/mobile-v3/source.part03 .aifactory/mobile-v3/source.part04 .aifactory/mobile-v3/source.part05 | base64 -d > /tmp/aif-v3.tar.xz
+          echo "63e4c3e8c64906e988a8aaccdfadbb34814043753beacfb246bc93d793bcdac5  /tmp/aif-v3.tar.xz" | sha256sum -c -
           mkdir -p mobile
           tar -xJf /tmp/aif-v3.tar.xz -C mobile --strip-components=1
           test -f mobile/app/build.gradle.kts
@@ -81,16 +81,16 @@ jobs:
           test -s "$APK"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee artifact/APKSIGNER-VERIFY.txt
-          cp "$APK" artifact/AI-Android-Factory-v3.0.0-Live-Voice.apk
+          cp "$APK" artifact/AI-Android-Factory-v3.1.0-Live-Voice.apk
           cd artifact
-          sha256sum AI-Android-Factory-v3.0.0-Live-Voice.apk > AI-Android-Factory-v3.0.0-Live-Voice.apk.sha256
-          unzip -t AI-Android-Factory-v3.0.0-Live-Voice.apk >/dev/null
+          sha256sum AI-Android-Factory-v3.1.0-Live-Voice.apk > AI-Android-Factory-v3.1.0-Live-Voice.apk.sha256
+          unzip -t AI-Android-Factory-v3.1.0-Live-Voice.apk >/dev/null
           ls -lh
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Android-Factory-v3.0.0-Live-Voice
+          name: AI-Android-Factory-v3.1.0-Live-Voice
           path: artifact/
           if-no-files-found: error
           retention-days: 7
