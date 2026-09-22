@@ -652,3 +652,5 @@ if __name__ == "__main__":
     main()
 
 # queue wake 2026-09-22
+
+# vpn-native retry wake 2026-09-22
