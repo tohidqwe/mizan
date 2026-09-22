@@ -105,31 +105,126 @@ def extract_json(s):
     if a < 0 or b <= a: raise ValueError("no JSON object")
     return json.loads(s[a:b+1])
 
+def detect_system_capabilities(req):
+    p = req["prompt"].lower()
+    checks = {
+        "vpn": ["vpn", "وی پی ان", "وی‌پی‌ان", "تونل", "v2ray", "wireguard", "openvpn"],
+        "gps": ["gps", "location", "موقعیت", "مکان", "لوکیشن", "geofence"],
+        "camera": ["camera", "دوربین", "عکس بگیرد", "اسکن"],
+        "microphone": ["microphone", "میکروفون", "ضبط صدا", "voice recorder"],
+        "bluetooth": ["bluetooth", "بلوتوث", "ble"],
+        "background_location": ["background location", "موقعیت پس‌زمینه", "ردیابی مداوم"],
+        "notifications": ["notification", "نوتیفیکیشن", "اعلان", "یادآوری"],
+        "nfc": ["nfc", "ان اف سی", "ان‌اف‌سی"]
+    }
+    return [name for name, words in checks.items() if any(w in p for w in words)]
+
+def run_agent(role, task, payload, max_tokens=2800):
+    system = f"""You are the {role} inside a senior software delivery team.
+Be concrete, skeptical, and faithful to the user's request. Never invent capabilities that the implementation cannot actually provide.
+Return ONLY valid JSON."""
+    raw = ai([
+        {"role":"system","content":system},
+        {"role":"user","content":task+"\n\nINPUT:\n"+json.dumps(payload,ensure_ascii=False)}
+    ], temperature=0.2, max_tokens=max_tokens)
+    return extract_json(raw)
+
 def planner(req):
-    system = """You are a senior product architect for Android apps. Convert the user's exact request into a concrete implementation plan.
-Return ONLY valid JSON. Never collapse a domain-specific request into a notes/todo app.
-Required schema:
-{
- "domain":"specific domain name",
- "summary":"one sentence",
- "screens":[{"id":"ascii-id","title":"visible screen title","purpose":"what user does"}],
- "entities":[{"name":"entity","fields":["field:type"]}],
- "features":["functional feature"],
- "workflows":["user workflow"],
- "acceptance":["testable acceptance condition"],
- "visual_direction":"concise UI direction"
-}
-Rules: 4-8 distinct screens for non-trivial apps; entities and workflows must be specific to the prompt; no fake cloud/backend claims; generated app will work offline with localStorage."""
-    raw = ai([{"role":"system","content":system},{"role":"user","content":req["prompt"]}], max_tokens=3000)
-    spec = extract_json(raw)
+    product = run_agent(
+        "Product Manager",
+        """Turn the request into a domain-specific product definition.
+Required JSON keys: domain, summary, users, features, workflows, acceptance.
+features/workflows/acceptance must be specific and testable. Do not collapse a domain app into notes/todo unless explicitly requested.""",
+        {"app_name":req["app_name"],"prompt":req["prompt"]},
+        2600
+    )
+
+    architect = run_agent(
+        "Android Software Architect",
+        """Design an implementable offline-first app architecture for the product.
+Required JSON keys: screens, entities, state_rules, navigation, visual_direction.
+screens must be an array of 4-8 objects with id,title,purpose for non-trivial apps.
+entities must be domain-specific. The current lightweight generator can only implement local/offline WebView features; do not claim native system capabilities are implemented.""",
+        product,
+        3200
+    )
+
+    security = run_agent(
+        "Security and Capability Engineer",
+        """Audit requested capabilities and classify them.
+Required JSON keys: system_capabilities, privacy_risks, permission_notes, implementation_constraints.
+For every system capability say whether a real native Android implementation is required. Never treat a visual toggle as proof that a capability works.""",
+        {"request":req["prompt"],"product":product,"architecture":architect},
+        2200
+    )
+
+    qa = run_agent(
+        "QA Lead",
+        """Create release gates for this app.
+Required JSON keys: must_prove, negative_checks, regression_risks.
+must_prove must contain concrete checks tied to the requested product, and must reject generic notes/todo substitutions.""",
+        {"request":req["prompt"],"product":product,"architecture":architect,"security":security},
+        2200
+    )
+
+    spec = {
+        "domain": product.get("domain",""),
+        "summary": product.get("summary",""),
+        "features": product.get("features",[]),
+        "workflows": product.get("workflows",[]),
+        "acceptance": product.get("acceptance",[]),
+        "screens": architect.get("screens",[]),
+        "entities": architect.get("entities",[]),
+        "state_rules": architect.get("state_rules",[]),
+        "navigation": architect.get("navigation",[]),
+        "visual_direction": architect.get("visual_direction",""),
+        "security": security,
+        "qa": qa,
+        "agent_reports": {
+            "product_manager": product,
+            "architect": architect,
+            "security_engineer": security,
+            "qa_lead": qa
+        }
+    }
+
     screens = spec.get("screens") or []
-    if len(screens) < 3: raise RuntimeError("AI plan is too generic: fewer than 3 screens")
+    if len(screens) < 3:
+        raise RuntimeError("Agent Team rejected architecture: fewer than 3 meaningful screens")
+
     domain = str(spec.get("domain","")).strip().lower()
     p = req["prompt"].lower()
     note_requested = any(x in p for x in ["یادداشت","note","notes","todo","to-do","وظایف","task"])
     if not note_requested and domain in {"notes","note app","todo","to-do","task manager","یادداشت"}:
-        raise RuntimeError("AI plan incorrectly collapsed request into a notes app")
+        raise RuntimeError("Agent Team rejected generic notes/todo substitution")
+
+    requested_native = detect_system_capabilities(req)
+    unsupported_native = [x for x in requested_native if x in {"vpn","gps","camera","microphone","bluetooth","background_location","nfc"}]
+    if unsupported_native:
+        raise RuntimeError(
+            "Proof-of-Function blocked fake system capability: "
+            + ", ".join(unsupported_native)
+            + ". This request requires the native-capability generator; a WebView simulation will not be released."
+        )
     return spec
+
+def build_proof_report(doc, spec, req):
+    problems = validate_html(doc, spec, req)
+    low = doc.lower()
+    checks = {
+        "complete_html": "<html" in low and "</html>" in low,
+        "domain_persistence": ("localstorage" in low) if (spec.get("entities") or []) else True,
+        "minimum_screens": len(re.findall(r'data-aif-screen\\s*=', doc, re.I)) >= min(3, len(spec.get("screens") or [])),
+        "minimum_controls": len(re.findall(r'<(?:button|input|select|textarea)\\b', doc, re.I)) >= 6,
+        "no_external_network": re.search(r'https?://', doc, re.I) is None,
+        "not_generic_notes": not any(x in low for x in ["notes app","todo list"]) or any(x in req["prompt"].lower() for x in ["note","todo","یادداشت","وظیفه"])
+    }
+    return {
+        "passed": not problems and all(checks.values()),
+        "checks": checks,
+        "problems": problems,
+        "qa_requirements": spec.get("qa",{}).get("must_prove",[])
+    }
 
 def clean_html(s):
     s = strip_fence(s)
@@ -182,13 +277,19 @@ MANDATORY:
 """
     user = "USER REQUEST:\n"+req["prompt"]+"\n\nAPP NAME:\n"+req["app_name"]+"\n\nARCHITECTURE JSON:\n"+json.dumps(spec,ensure_ascii=False)
     doc = clean_html(ai([{"role":"system","content":system},{"role":"user","content":user}], temperature=0.4, max_tokens=10000))
-    for repair in range(2):
+    for repair in range(3):
         problems = validate_html(doc,spec,req)
         if not problems: return doc
         repair_prompt = "Repair this offline single-file app so it satisfies every listed problem and the architecture. Return ONLY the full corrected HTML.\nPROBLEMS:\n- " + "\n- ".join(problems) + "\nARCHITECTURE:\n" + json.dumps(spec,ensure_ascii=False) + "\nCURRENT HTML:\n" + doc[:45000]
         doc = clean_html(ai([{"role":"system","content":"You are a strict senior UI engineer. Preserve working domain features and fix all validation failures."},{"role":"user","content":repair_prompt}], temperature=0.25, max_tokens=10000))
     problems = validate_html(doc,spec,req)
-    if problems: raise RuntimeError("generated app failed semantic gate: " + "; ".join(problems))
+    if problems:
+        raise RuntimeError("Auto-Repair exhausted: " + "; ".join(problems))
+    proof = build_proof_report(doc,spec,req)
+    if not proof["passed"]:
+        raise RuntimeError("Proof-of-Function failed: " + "; ".join(proof["problems"]))
+    Path("aif-proof.json").write_text(json.dumps(proof,ensure_ascii=False,indent=2),"utf-8")
+    Path("aif-agents.json").write_text(json.dumps(spec.get("agent_reports",{}),ensure_ascii=False,indent=2),"utf-8")
     return doc
 
 def write_project(req, index_html, spec=None):
@@ -242,7 +343,16 @@ public class MainActivity extends Activity {{
     (OUT/"app/src/main/java"/pkg_path/"MainActivity.java").write_text(java,"utf-8")
     if not internet:
         (OUT/"app/src/main/assets/www/index.html").write_text(index_html,"utf-8")
-    manifest_out = {"request_id":req["id"],"app_name":req["app_name"],"package":req["package"],"mode":req["mode"],"spec":spec}
+    manifest_out = {
+        "request_id":req["id"],
+        "app_name":req["app_name"],
+        "package":req["package"],
+        "mode":req["mode"],
+        "memory_key":req["package"],
+        "memory_version_strategy":"continue_same_package",
+        "features_v3":["agent_team","proof_of_function","project_memory","auto_repair"],
+        "spec":spec
+    }
     Path("aif-manifest.json").write_text(json.dumps(manifest_out,ensure_ascii=False,indent=2),"utf-8")
 
 def main():
