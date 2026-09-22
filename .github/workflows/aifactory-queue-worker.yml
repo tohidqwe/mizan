@@ -197,8 +197,9 @@ jobs:
           BUILD_ID: ${{ steps.lease.outputs.build_id }}
         run: |
           set +e
-          DETAIL="$(tail -n 8 /tmp/aif-failure.txt 2>/dev/null | tr '\n' ' ' | sed 's/[[:cntrl:]]//g' | cut -c1-1400)"
-          [ -n "$DETAIL" ] || DETAIL="Build worker failed. Check GitHub Actions logs."
+          DETAIL="$(grep -E 'AIF ERROR:|RuntimeError:' /tmp/aif-generate.log 2>/dev/null | tail -n1 | sed -E 's/^.*(AIF ERROR:|RuntimeError:) ?//' | tr '\n' ' ' | sed 's/[[:cntrl:]]//g' | cut -c1-900)"
+          [ -n "$DETAIL" ] || DETAIL="$(tail -n 2 /tmp/aif-failure.txt 2>/dev/null | tr '\n' ' ' | sed 's/[[:cntrl:]]//g' | cut -c1-900)"
+          [ -n "$DETAIL" ] || DETAIL="Build متوقف شد؛ علت فنی ثبت نشد."
           OIDC="$(curl -fsSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN"             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=aifactory-worker" | jq -r .value)"
           jq -n --arg build "$BUILD_ID" --arg msg "$DETAIL"             '{build_id:$build,status:"failed",stage:"failed",progress:100,error_code:"WORKER_FAILURE",error_message:$msg}'             | curl -fsSL -X POST "$BUILD_API/worker-update"                 -H "Authorization: Bearer $OIDC" -H "Content-Type: application/json" -d @- >/dev/null
 # trigger queue regression after capability-fix
