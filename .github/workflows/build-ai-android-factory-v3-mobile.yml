@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           cat .aifactory/mobile-v3/source.part01 .aifactory/mobile-v3/source.part02 .aifactory/mobile-v3/source.part03 .aifactory/mobile-v3/source.part04 .aifactory/mobile-v3/source.part05 | base64 -d > /tmp/aif-v3.tar.xz
-          echo "63e4c3e8c64906e988a8aaccdfadbb34814043753beacfb246bc93d793bcdac5  /tmp/aif-v3.tar.xz" | sha256sum -c -
+          echo "49831f731e8a7fc6873150cff3df424df309de63915ed36eabc96d0bed9816fb  /tmp/aif-v3.tar.xz" | sha256sum -c -
           mkdir -p mobile
           tar -xJf /tmp/aif-v3.tar.xz -C mobile --strip-components=1
           test -f mobile/app/build.gradle.kts
