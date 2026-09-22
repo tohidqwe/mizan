@@ -16,6 +16,31 @@ def b64d(v):
         die(f"invalid base64 field: {e}")
 
 def parse_request():
+    env_b64 = os.environ.get("AIF_REQUEST_JSON_B64","").strip()
+    env_json = os.environ.get("AIF_REQUEST_JSON","").strip()
+    if env_b64 or env_json:
+        try:
+            if env_b64:
+                payload = json.loads(base64.b64decode(env_b64).decode("utf-8"))
+            else:
+                payload = json.loads(env_json)
+        except Exception as e:
+            die(f"invalid queued request JSON: {e}")
+        rid = str(payload.get("id",""))
+        app = str(payload.get("app_name",""))
+        package = str(payload.get("package_name","")).strip().lower()
+        mode = str(payload.get("mode","prompt"))
+        prompt = str(payload.get("prompt",""))
+        url = str(payload.get("url",""))
+        permissions = payload.get("permissions") or []
+        if not re.match(r"^[a-f0-9-]{36}$", rid, re.I): die("invalid queued request id")
+        if not re.match(r"^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$", package): die("invalid package name")
+        if mode not in ("prompt","url"): die("unsupported mode")
+        if mode == "prompt" and len(prompt.strip()) < 8: die("prompt too short")
+        if mode == "url" and not re.match(r"^https://", url, re.I): die("URL mode requires HTTPS")
+        if len(prompt) > 50000: die("prompt too long: maximum 50000 characters")
+        return {"id":rid, "actor":"supabase-queue", "app_name":app[:80], "package":package, "mode":mode, "prompt":prompt, "url":url, "permissions":permissions}
+
     ev = json.loads(EVENT.read_text("utf-8"))
     issue = ev["issue"]
     title = issue.get("title","")
@@ -60,7 +85,7 @@ def parse_request():
     if mode == "prompt" and len(prompt.strip()) < 8: die("prompt too short")
     if mode == "url" and not re.match(r"^https://", url, re.I): die("URL mode requires HTTPS")
     if len(prompt) > 50000: die("prompt too long: maximum 50000 characters")
-    return {"id":rid, "actor":actor, "app_name":app[:80], "package":package, "mode":mode, "prompt":prompt, "url":url}
+    return {"id":rid, "actor":actor, "app_name":app[:80], "package":package, "mode":mode, "prompt":prompt, "url":url, "permissions":[]}
 
 def ai(messages, model="copilot", temperature=0.35, max_tokens=7000):
     combined = []
