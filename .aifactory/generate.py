@@ -142,7 +142,11 @@ def detect_system_capabilities(req):
         "notifications": ["notification", "نوتیفیکیشن", "اعلان", "یادآوری"],
         "nfc": ["nfc", "ان اف سی", "ان‌اف‌سی"]
     }
-    return [name for name, words in checks.items() if any(w in p for w in words)]
+    def hit(term):
+        if re.fullmatch(r"[a-z0-9][a-z0-9 _.-]*", term):
+            return re.search(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])", p) is not None
+        return term in p
+    return [name for name, words in checks.items() if any(hit(w) for w in words)]
 
 def run_agent(role, task, payload, max_tokens=2800):
     system = f"""You are the {role} inside a senior software delivery team.
