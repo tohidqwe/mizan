@@ -31,33 +31,7 @@ jobs:
 
           # Fix FileProvider roots used by the generated APK installer.
           mkdir -p mobile/app/src/main/res/xml
-          found_paths=0
-          for p in mobile/app/src/main/res/xml/*.xml; do
-            [ -f "$p" ] || continue
-            if grep -q '<paths' "$p"; then
-              cat > "$p" <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <cache-path name="generated_apks" path="generated-apks/" />
-    <cache-path name="cache_root" path="." />
-    <external-cache-path name="external_cache_root" path="." />
-    <files-path name="files_root" path="." />
-</paths>
-EOF
-              found_paths=1
-            fi
-          done
-          if [ "$found_paths" -eq 0 ]; then
-            cat > mobile/app/src/main/res/xml/file_paths.xml <<'EOF'
-<?xml version="1.0" encoding="utf-8"?>
-<paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <cache-path name="generated_apks" path="generated-apks/" />
-    <cache-path name="cache_root" path="." />
-    <external-cache-path name="external_cache_root" path="." />
-    <files-path name="files_root" path="." />
-</paths>
-EOF
-          fi
+          python3 -c 'from pathlib import Path; d=Path("mobile/app/src/main/res/xml"); x="<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<paths xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <cache-path name=\"generated_apks\" path=\"generated-apks/\" />\n    <cache-path name=\"cache_root\" path=\".\" />\n    <external-cache-path name=\"external_cache_root\" path=\".\" />\n    <files-path name=\"files_root\" path=\".\" />\n</paths>\n"; ps=[p for p in d.glob("*.xml") if "<paths" in p.read_text(encoding="utf-8",errors="ignore")]; [p.write_text(x,encoding="utf-8") for p in ps]; (d/"file_paths.xml").write_text(x,encoding="utf-8") if not ps else None'
 
           # Bump mobile patch version so the fixed build is easy to identify.
           sed -i 's/versionName = "3.1.0"/versionName = "3.1.1"/g; s/versionCode = 31/versionCode = 32/g' mobile/app/build.gradle.kts || true
